@@ -1,0 +1,11 @@
+zones:
+  - zone_id: border-zone-1
+    camera_id: camera-1
+    polygon:
+      - [534, 0]     # top-left
+      - [764, 0]   # bottom-left
+      - [760, 429]   # bottom-right
+      - [531, 428]     # top-right
+    sensitivity: medium
+
+  

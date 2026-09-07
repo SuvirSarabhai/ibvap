@@ -1,0 +1,13 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+app/.venv/
+*.db
+*.db-journal
+yolov8n.pt
+models/*.pt
+evidence/*
+!evidence/.gitkeep
+test_videos/*
+!test_videos/.gitkeep

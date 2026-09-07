@@ -1,0 +1,10 @@
+{
+  "description": "The tactical border surveillance dashboard enables real-time monitoring and analysis of threats and incidents, enhancing security operations for border control agencies.",
+  "robots": {
+    "index": false
+  },
+  "accessibility": {
+    "addBypassLinks": false,
+    "ignoreReducedMotion": false
+  }
+}

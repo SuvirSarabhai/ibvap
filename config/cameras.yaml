@@ -1,0 +1,6 @@
+# Replace the example source with a local file in test_videos/ or an RTSP URL.
+cameras:
+  - camera_id: camera-1
+    source: test_videos/sample.mp4
+    zones:
+      - border-zone-1
