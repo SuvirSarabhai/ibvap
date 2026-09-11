@@ -1,4 +1,7 @@
+import { useEffect, useState } from 'react'
 import { Camera, AlertTriangle, FileText, Activity, ArrowRight, WifiOff, Clock } from 'lucide-react'
+import { getSummary } from '../api/client'
+import useAlertSocket from '../hooks/useAlertSocket'
 
 const CAMERAS = [
   {
@@ -83,6 +86,20 @@ interface Props {
 }
 
 export default function Dashboard({ onNavigate }: Props) {
+  const [summary, setSummary] = useState<{ cameras_total: number; cameras_online: number; cameras_offline: number; active_threats_high: number; active_threats_medium: number; incidents_today: number; incidents_confirmed: number; incidents_pending: number; system_health_pct: number } | null>(null)
+
+  const refreshSummary = () => getSummary().then(setSummary).catch(() => undefined)
+
+  useEffect(() => { void refreshSummary() }, [])
+  useAlertSocket(() => { void refreshSummary() })
+
+  const stats = summary ? [
+    { ...STATS[0], value: summary.cameras_total, sub: `${summary.cameras_online} online · ${summary.cameras_offline} offline` },
+    { ...STATS[1], value: summary.active_threats_high + summary.active_threats_medium, sub: `${summary.active_threats_high} high · ${summary.active_threats_medium} medium` },
+    { ...STATS[2], value: summary.incidents_today, sub: `${summary.incidents_confirmed} confirmed · ${summary.incidents_pending} pending` },
+    { ...STATS[3], value: `${summary.system_health_pct}%` },
+  ] : STATS
+
   return (
     <div className="p-8 max-w-[1200px]">
       {/* Header */}
@@ -101,14 +118,14 @@ export default function Dashboard({ onNavigate }: Props) {
             style={{ background: '#D64545', color: '#fff' }}
           >
             <AlertTriangle size={12} />
-            1 HIGH THREAT ACTIVE
+            {summary?.active_threats_high ?? 1} HIGH THREAT ACTIVE
           </span>
         </div>
       </div>
 
       {/* Stat Cards */}
       <div className="grid grid-cols-4 gap-4 mb-7">
-        {STATS.map(({ label, value, sub, icon: Icon, color, bg }) => (
+        {stats.map(({ label, value, sub, icon: Icon, color, bg }) => (
           <div
             key={label}
             className="bg-white rounded-xl p-5"

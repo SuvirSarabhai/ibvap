@@ -15,6 +15,7 @@ export interface ActivityRow {
   threatScore: number
   severity: Severity
   status: 'open' | 'reviewing' | 'closed' | 'escalated'
+  evidencePath?: string | null
 }
 
 export const ACTIVITY_DATA: ActivityRow[] = [

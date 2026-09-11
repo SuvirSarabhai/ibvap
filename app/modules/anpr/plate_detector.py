@@ -34,17 +34,38 @@ class PlateDetector:
     def detect(self, frame, vehicle_bbox):
         """Return the best plate crop for a given vehicle bounding box."""
         x1, y1, x2, y2 = (int(v) for v in vehicle_bbox)
+        h, w = frame.shape[:2]
+
+        # Add 10px padding around vehicle bbox to catch plate at edges
+        pad = 10
+        cx1, cy1 = max(0, x1 - pad), max(0, y1 - pad)
+        cx2, cy2 = min(w, x2 + pad), min(h, y2 + pad)
+        vehicle_crop = frame[cy1:cy2, cx1:cx2]
+
+        if vehicle_crop.size == 0:
+            return vehicle_crop
+
         if self.model is None:
-            # Fallback: pass the whole vehicle region to OCR.
-            return frame[max(0, y1) : max(0, y2), max(0, x1) : max(0, x2)]
+            # Fallback: bottom-third of vehicle crop (plates are usually low)
+            third = (cy2 - cy1) // 3
+            return vehicle_crop[2 * third:, :]
+
         try:
-            results = self.model(frame, verbose=False)
+            # Run plate detector on the vehicle crop (not full frame)
+            results = self.model(vehicle_crop, verbose=False)
             for result in results or []:
                 boxes = getattr(result, "boxes", None)
                 if boxes is not None and len(boxes.xyxy):
-                    coords = boxes.xyxy[0].cpu().tolist()
+                    # Pick highest-confidence detection
+                    best_idx = int(boxes.conf.argmax()) if hasattr(boxes, "conf") else 0
+                    coords = boxes.xyxy[best_idx].cpu().tolist()
                     px1, py1, px2, py2 = (int(v) for v in coords)
-                    return frame[max(0, py1) : max(0, py2), max(0, px1) : max(0, px2)]
+                    plate_crop = vehicle_crop[max(0, py1):max(0, py2), max(0, px1):max(0, px2)]
+                    if plate_crop.size > 0:
+                        return plate_crop
         except Exception:
             logger.exception("Plate detection inference failed; using vehicle crop fallback")
-        return frame[max(0, y1) : max(0, y2), max(0, x1) : max(0, x2)]
+
+        # Fallback: bottom-third of vehicle crop
+        third = (cy2 - cy1) // 3
+        return vehicle_crop[2 * third:, :]

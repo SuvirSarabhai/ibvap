@@ -22,10 +22,36 @@ from app.modules.anpr.voting import PlateVoter
 from app.modules.night_detection import process_night_check
 from app.modules.zone_intrusion import process_detection
 from app.utils.logger import get_logger
-from app.utils.paths import CONFIG_DIR
+from app.utils.paths import CONFIG_DIR, REPOSITORY_ROOT
 
 logger = get_logger(__name__)
 VEHICLE_CLASSES = {"car", "motorcycle", "bus", "truck"}
+
+EVIDENCE_DIR = REPOSITORY_ROOT / "evidence"
+EVIDENCE_DIR.mkdir(exist_ok=True)
+
+
+def _save_snapshot(frame, bbox: tuple, event_id: str) -> str | None:
+    """Crop + pad the bounding box and save as JPEG. Returns relative path or None."""
+    try:
+        x1, y1, x2, y2 = map(int, bbox)
+        h, w = frame.shape[:2]
+        pad = 20
+        x1c = max(0, x1 - pad)
+        y1c = max(0, y1 - pad)
+        x2c = min(w, x2 + pad)
+        y2c = min(h, y2 + pad)
+        crop = frame[y1c:y2c, x1c:x2c]
+        if crop.size == 0:
+            return None
+        filename = f"{event_id}.jpg"
+        path = EVIDENCE_DIR / filename
+        cv2.imwrite(str(path), crop, [cv2.IMWRITE_JPEG_QUALITY, 90])
+        return filename
+    except Exception:
+        logger.warning("Could not save evidence snapshot for %s", event_id)
+        return None
+
 
 
 class CameraWorker:
@@ -56,6 +82,10 @@ class CameraWorker:
         # makes one finalized plate produce one event/alert per track incident.
         self._finalized_plates: dict[str, set[str]] = {}
         self._active_track_ids: set[str] = set()
+        self._snapped_tracks: set[str] = set()  # track_ids we've already snapped
+        # Throttle base detection events: one per track_id per N seconds
+        self._last_detection_time: dict[str, float] = {}
+        self._detection_interval_s: float = 30.0
         self.zones = self._load_zones()
         self.thresholds = self._load_thresholds()
 
@@ -86,33 +116,87 @@ class CameraWorker:
         night_end = int(self.thresholds.get("night_end_hour", 6))
 
         for detection in detections:
-            for zone in camera_zones:
-                event, _ = process_detection(
-                    detection,
-                    self.camera_id,
-                    str(zone["zone_id"]),
-                    zone["polygon"],
-                    self.incident_tracker,
-                    frame_threshold,
-                    self.event_store,
-                    self.alert_manager,
-                    frame,
-                )
-                inside = bool(event.metadata.get("inside_zone"))
-                process_night_check(
-                    detection.track_id,
-                    self.camera_id,
-                    str(zone["zone_id"]),
-                    inside,
-                    self.incident_tracker,
-                    night_seconds,
-                    self.event_store,
-                    self.alert_manager,
-                    start_hour=night_start,
-                    end_hour=night_end,
+            class_name = detection.class_name.lower()
+            is_vehicle = class_name in VEHICLE_CLASSES
+            is_person = class_name == "person"
+            entity_type = "vehicle" if is_vehicle else "person" if is_person else None
+
+            # Skip uninteresting classes (e.g. dog, bicycle — not our concern)
+            if entity_type is None:
+                continue
+
+            # ── 1. Base detection event — throttled to once per track per 30 s ──
+            now = time.monotonic()
+            last = self._last_detection_time.get(detection.track_id, 0.0)
+            should_log = (now - last) >= self._detection_interval_s
+
+            snap_path = None
+            if is_vehicle and detection.track_id not in self._snapped_tracks:
+                # Save one snapshot per track (first time we see this vehicle)
+                from uuid import uuid4
+                snap_id = str(uuid4())
+                snap_path = _save_snapshot(frame, detection.bbox, snap_id)
+                if snap_path:
+                    self._snapped_tracks.add(detection.track_id)
+
+            if should_log:
+                self._last_detection_time[detection.track_id] = now
+                self.event_store.save_event(
+                    Event(
+                        track_id=detection.track_id,
+                        camera_id=self.camera_id,
+                        event_type="detection",
+                        timestamp=datetime.now(timezone.utc),
+                        metadata={"class": class_name, "bbox": list(detection.bbox)},
+                        event_description=f"{detection.class_name.title()} detected",
+                        event_type_label="Detections",
+                        entity_type=entity_type,
+                        confidence=detection.confidence,
+                        severity="normal",
+                        evidence_path=snap_path,
+                    )
                 )
 
-            if detection.class_name.lower() not in VEHICLE_CLASSES:
+            # ── 2. Zone check — persons only ──
+            if is_person:
+                event_description = f"Person in zone — {self.camera_id}"
+                for zone in camera_zones:
+                    event, _ = process_detection(
+                        detection,
+                        self.camera_id,
+                        str(zone["zone_id"]),
+                        zone["polygon"],
+                        self.incident_tracker,
+                        frame_threshold,
+                        self.event_store,
+                        self.alert_manager,
+                        frame,
+                        event_description=event_description,
+                        event_type_label="Zone Entry",
+                        entity_type=entity_type,
+                        confidence=detection.confidence,
+                        severity="high",
+                    )
+                    inside = bool(event.metadata.get("inside_zone"))
+                    process_night_check(
+                        detection.track_id,
+                        self.camera_id,
+                        str(zone["zone_id"]),
+                        inside,
+                        self.incident_tracker,
+                        night_seconds,
+                        self.event_store,
+                        self.alert_manager,
+                        start_hour=night_start,
+                        end_hour=night_end,
+                        event_description=event_description,
+                        event_type_label="Night Movement",
+                        entity_type=entity_type,
+                        confidence=detection.confidence,
+                    )
+
+            # ── 3. ANPR — vehicles only ──
+            if not is_vehicle:
                 continue
 
             crop = self.plate_detector.detect(frame, detection.bbox)
@@ -134,6 +218,11 @@ class CameraWorker:
                         event_type="vehicle_plate",
                         timestamp=datetime.now(timezone.utc),
                         metadata={"plate": plate, "bbox": list(detection.bbox)},
+                        event_description=f"License plate detected — {plate}",
+                        event_type_label="ANPR",
+                        entity_type="vehicle",
+                        confidence=detection.confidence,
+                        severity="normal",
                     )
                 )
                 if self.alert_manager.is_restricted(plate):
@@ -143,6 +232,7 @@ class CameraWorker:
                         "high",
                     )
 
+
     def _clear_finished_tracks(self, detections: list[Detection]) -> None:
         """Drop plate state for tracks no longer present in the current frame."""
         active_tracks = {detection.track_id for detection in detections}
@@ -151,6 +241,8 @@ class CameraWorker:
                 self._finalized_plates.pop(track_id, None)
                 self.plate_voter.clear(track_id)
                 self.incident_tracker.reset_track(track_id)
+        # Clean up snapped tracks that are no longer active
+        self._snapped_tracks -= (self._snapped_tracks - active_tracks)
 
     def run(self) -> None:
         reader = LatestFrameReader(self.source).start()
@@ -161,6 +253,7 @@ class CameraWorker:
             return
 
         last_sequence = -1
+        last_loop = 0
         try:
             while not self.stop_requested:
                 frame = reader.get()
@@ -170,6 +263,16 @@ class CameraWorker:
                         break
                     time.sleep(0.005)
                     continue
+
+                # Detect video loop and reset per-session state
+                current_loop = reader.loop_count
+                if current_loop != last_loop:
+                    last_loop = current_loop
+                    self._snapped_tracks.clear()
+                    self._last_detection_time.clear()
+                    self._finalized_plates.clear()
+                    self.plate_voter._votes.clear() if hasattr(self.plate_voter, '_votes') else None
+                    logger.info("Video looped (%d) — state reset for %s", current_loop, self.camera_id)
 
                 last_sequence = sequence
                 detections = self.detector.detect_and_track(frame)
@@ -190,6 +293,7 @@ class CameraWorker:
             self.online = False
             if self.show_window:
                 cv2.destroyWindow(f"IBVAP - {self.camera_id}")
+
 
 
 def draw_detections(frame, detections: list[Detection]):

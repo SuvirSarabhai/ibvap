@@ -35,6 +35,11 @@ def process_detection(
     event_store=None,
     alert_manager=None,
     frame=None,
+    event_description: str | None = None,
+    event_type_label: str | None = None,
+    entity_type: str | None = None,
+    confidence: float | None = None,
+    severity: str = "normal",
 ):
     """Persist one check and promote only when continuous entry is established."""
     inside = check_zone(detection.track_id, detection.bbox, zone_polygon)
@@ -45,6 +50,11 @@ def process_detection(
         zone_id=zone_id,
         timestamp=datetime.now(timezone.utc),
         metadata={"inside_zone": inside, "bbox": list(detection.bbox)},
+        event_description=event_description,
+        event_type_label=event_type_label,
+        entity_type=entity_type,
+        confidence=confidence,
+        severity=severity,
     )
     if event_store:
         event = event_store.save_event(event)

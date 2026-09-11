@@ -1,6 +1,7 @@
 import { useState } from 'react'
-import { WifiOff, Wifi, AlertTriangle, ChevronDown, Wrench } from 'lucide-react'
+import { WifiOff, Wifi, AlertTriangle, ChevronDown, Wrench, Maximize2 } from 'lucide-react'
 import { CAMERA_FLEET } from '../data/mockData'
+import VideoLightbox from '../components/VideoLightbox'
 
 const ZONES = ['All', 'Zone A', 'Zone B', 'Zone C', 'Zone D', 'Zone E', 'Zone F', 'Zone G']
 const GRID_SIZES = [
@@ -9,15 +10,12 @@ const GRID_SIZES = [
   { label: '4×6', cols: 6 },
 ] as const
 
-const UNSPLASH = [
-  'https://images.unsplash.com/photo-1558618666-fcd25c85cd64?w=400&h=240&fit=crop&auto=format',
-  'https://images.unsplash.com/photo-1544986581-efac024faf62?w=400&h=240&fit=crop&auto=format',
-  'https://images.unsplash.com/photo-1473445730015-841f29a9490b?w=400&h=240&fit=crop&auto=format',
-  'https://images.unsplash.com/photo-1504711434969-e33886168f5c?w=400&h=240&fit=crop&auto=format',
-  'https://images.unsplash.com/photo-1461360370896-922624d12aa1?w=400&h=240&fit=crop&auto=format',
-  'https://images.unsplash.com/photo-1621905252507-b35492cc74b4?w=400&h=240&fit=crop&auto=format',
-  'https://images.unsplash.com/photo-1582139329536-e7284fece509?w=400&h=240&fit=crop&auto=format',
-  'https://images.unsplash.com/photo-1565598897684-9f0a3d7ab39e?w=400&h=240&fit=crop&auto=format',
+// Real video files from test_videos/ — served by FastAPI /api/stream/:filename
+const API_BASE = 'http://localhost:8000'
+const VIDEO_SOURCES = [
+  `${API_BASE}/api/stream/zone.mp4`,
+  `${API_BASE}/api/stream/sample.mp4`,
+  `${API_BASE}/api/stream/car.mp4`,
 ]
 
 const sevDot = (sev: string) => {
@@ -31,6 +29,7 @@ export default function LiveMonitoring() {
   const [statusFilter, setStatusFilter] = useState('All')
   const [gridIdx, setGridIdx] = useState(0)
   const [hoveredCam, setHoveredCam] = useState<string | null>(null)
+  const [selectedCam, setSelectedCam] = useState<{ cam: typeof CAMERA_FLEET[0]; src: string } | null>(null)
 
   const cols = GRID_SIZES[gridIdx].cols
 
@@ -47,6 +46,11 @@ export default function LiveMonitoring() {
 
   return (
     <div className="p-8">
+      <VideoLightbox
+        camera={selectedCam?.cam ?? null}
+        videoSrc={selectedCam?.src ?? null}
+        onClose={() => setSelectedCam(null)}
+      />
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div>
@@ -144,15 +148,16 @@ export default function LiveMonitoring() {
         style={{ gridTemplateColumns: `repeat(${cols}, 1fr)` }}
       >
         {filtered.map((cam, idx) => {
-          const imgUrl = UNSPLASH[idx % UNSPLASH.length]
+          const videoSrc = VIDEO_SOURCES[idx % VIDEO_SOURCES.length]
           const isOffline = cam.status === 'offline' || cam.status === 'maintenance'
           const hovered = hoveredCam === cam.id
           return (
             <div
               key={cam.id}
-              className="relative overflow-hidden rounded-xl cursor-pointer"
+              className="relative overflow-hidden rounded-xl cursor-pointer group"
               style={{
                 aspectRatio: '16/9',
+                background: '#0f1923',
                 border: cam.status === 'offline'
                   ? '1.5px solid rgba(214,69,69,0.4)'
                   : cam.status === 'degraded'
@@ -163,7 +168,18 @@ export default function LiveMonitoring() {
               }}
               onMouseEnter={() => setHoveredCam(cam.id)}
               onMouseLeave={() => setHoveredCam(null)}
+              onClick={() => setSelectedCam({ cam, src: videoSrc })}
             >
+              {/* Expand hint on hover */}
+              {hovered && (
+                <div
+                  className="absolute top-2 right-2 z-10 flex items-center gap-1 px-1.5 py-1 rounded-md"
+                  style={{ background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(4px)' }}
+                >
+                  <Maximize2 size={10} style={{ color: 'rgba(255,255,255,0.8)' }} />
+                  <span className="text-white" style={{ fontSize: 9, letterSpacing: '0.04em' }}>EXPAND</span>
+                </div>
+              )}
               {isOffline ? (
                 <div className="w-full h-full flex flex-col items-center justify-center" style={{ background: '#0f1923' }}>
                   {cam.status === 'maintenance'
@@ -174,11 +190,17 @@ export default function LiveMonitoring() {
                   </span>
                 </div>
               ) : (
-                <img
-                  src={imgUrl}
-                  alt={cam.name}
+                <video
+                  key={videoSrc}
+                  src={videoSrc}
+                  autoPlay
+                  loop
+                  muted
+                  playsInline
                   className="w-full h-full object-cover"
-                  style={{ filter: cam.status === 'degraded' ? 'brightness(0.7) saturate(0.5)' : 'none' }}
+                  style={{
+                    filter: cam.status === 'degraded' ? 'brightness(0.7) saturate(0.5)' : 'none',
+                  }}
                 />
               )}
 

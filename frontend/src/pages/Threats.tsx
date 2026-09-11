@@ -1,6 +1,8 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { AlertTriangle, User, Car, ChevronDown, Shield, Check, ArrowUpRight, Clock } from 'lucide-react'
-import { THREATS_DATA, type ThreatEntry, type ThreatStatus } from '../data/mockData'
+import type { ThreatEntry, ThreatStatus } from '../data/mockData'
+import { alertToThreat, getAlerts, updateAlert } from '../api/client'
+import useAlertSocket from '../hooks/useAlertSocket'
 import SeverityBadge from '../components/SeverityBadge'
 
 const STATUS_STYLES: Record<ThreatStatus, { bg: string; text: string; label: string }> = {
@@ -11,8 +13,24 @@ const STATUS_STYLES: Record<ThreatStatus, { bg: string; text: string; label: str
 }
 
 export default function Threats() {
-  const [data, setData] = useState<ThreatEntry[]>(THREATS_DATA)
+  const [data, setData] = useState<ThreatEntry[]>([])
   const [filter, setFilter] = useState<'all' | 'active' | 'acknowledged' | 'escalated'>('all')
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    let mounted = true
+    getAlerts()
+      .then((alerts) => { if (mounted) setData(alerts) })
+      .catch((err) => { if (mounted) setError(err instanceof Error ? err.message : 'Unable to load alerts') })
+      .finally(() => { if (mounted) setLoading(false) })
+    return () => { mounted = false }
+  }, [])
+
+  useAlertSocket((alert) => {
+    const next = alertToThreat(alert)
+    setData((previous) => [next, ...previous.filter((item) => item.id !== next.id)])
+  })
 
   const activeHigh = data.filter((t) => t.status !== 'dismissed' && t.severity === 'high').length
   const activeMed = data.filter((t) => t.status !== 'dismissed' && t.severity === 'medium').length
@@ -27,8 +45,14 @@ export default function Threats() {
 
   const [showResolved, setShowResolved] = useState(false)
 
-  const updateStatus = (id: string, status: ThreatStatus) => {
-    setData((prev) => prev.map((t) => (t.id === id ? { ...t, status, assignedTo: status === 'acknowledged' ? 'J. Ramirez' : t.assignedTo } : t)))
+  const updateStatus = async (id: string, status: ThreatStatus) => {
+    try {
+      const alert = await updateAlert(id, { status, assigned_to: status === 'acknowledged' ? 'J. Ramirez' : undefined })
+      const next = alertToThreat(alert)
+      setData((previous) => previous.map((item) => item.id === id ? next : item))
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unable to update alert')
+    }
   }
 
   return (
@@ -48,6 +72,9 @@ export default function Threats() {
           </span>
         )}
       </div>
+
+      {loading && <div className="text-sm mb-4" style={{ color: '#64748B' }}>Loading alerts...</div>}
+      {error && <div className="text-sm mb-4" style={{ color: '#D64545' }}>Failed to load alerts: {error}</div>}
 
       {/* KPI strip */}
       <div className="grid grid-cols-3 gap-4 mb-6">

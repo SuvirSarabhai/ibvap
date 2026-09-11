@@ -1,6 +1,7 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { FileCheck, User, Car, X, Clock, Archive } from 'lucide-react'
-import { INCIDENTS_DATA, type IncidentEntry, type IncidentStatus } from '../data/mockData'
+import type { IncidentEntry, IncidentStatus } from '../data/mockData'
+import { addIncidentNote, createIncident, getIncidents, incidentToEntry, updateIncident } from '../api/client'
 import SeverityBadge from '../components/SeverityBadge'
 
 const STATUS_STYLES: Record<IncidentStatus, { bg: string; text: string }> = {
@@ -13,17 +14,69 @@ const STATUS_STYLES: Record<IncidentStatus, { bg: string; text: string }> = {
 export default function Incidents() {
   const [statusFilter, setStatusFilter] = useState<'All' | IncidentStatus>('All')
   const [selected, setSelected] = useState<IncidentEntry | null>(null)
+  const [data, setData] = useState<IncidentEntry[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
 
-  const filtered = INCIDENTS_DATA.filter((inc) =>
+  const refresh = async () => {
+    const incidents = await getIncidents()
+    setData(incidents)
+  }
+
+  useEffect(() => {
+    refresh()
+      .catch((err) => setError(err instanceof Error ? err.message : 'Unable to load incidents'))
+      .finally(() => setLoading(false))
+  }, [])
+
+  const filtered = data.filter((inc) =>
     statusFilter === 'All' ? true : inc.status === statusFilter
   )
 
   const counts = {
-    All: INCIDENTS_DATA.length,
-    open: INCIDENTS_DATA.filter((i) => i.status === 'open').length,
-    reviewing: INCIDENTS_DATA.filter((i) => i.status === 'reviewing').length,
-    escalated: INCIDENTS_DATA.filter((i) => i.status === 'escalated').length,
-    closed: INCIDENTS_DATA.filter((i) => i.status === 'closed').length,
+    All: data.length,
+    open: data.filter((i) => i.status === 'open').length,
+    reviewing: data.filter((i) => i.status === 'reviewing').length,
+    escalated: data.filter((i) => i.status === 'escalated').length,
+    closed: data.filter((i) => i.status === 'closed').length,
+  }
+
+  const updateSelected = async (body: Record<string, unknown>) => {
+    if (!selected) return
+    try {
+      const updated = incidentToEntry(await updateIncident(selected.id, body))
+      setSelected(updated)
+      setData((previous) => previous.map((item) => item.id === updated.id ? updated : item))
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unable to update incident')
+    }
+  }
+
+  const createManualIncident = async () => {
+    const incidentType = window.prompt('Incident type', 'Manual Review')
+    if (!incidentType) return
+    const cameraId = window.prompt('Camera ID', 'manual')
+    if (!cameraId) return
+    try {
+      const incident = incidentToEntry(await createIncident({ incident_type: incidentType, camera_id: cameraId, severity: 'normal' }))
+      setData((previous) => [incident, ...previous])
+      setSelected(incident)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unable to create incident')
+    }
+  }
+
+  const addNote = async () => {
+    if (!selected) return
+    const text = window.prompt('Note')
+    if (!text) return
+    try {
+      const updated = incidentToEntry(await addIncidentNote(selected.id, { operator: 'J. Ramirez', text }))
+      setSelected(updated)
+      setData((previous) => previous.map((item) => item.id === updated.id ? updated : item))
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unable to add note')
+    }
   }
 
   return (
@@ -35,17 +88,21 @@ export default function Incidents() {
           <div>
             <h1 className="text-xl font-semibold" style={{ color: '#17212B' }}>Confirmed Incidents</h1>
             <p className="text-sm mt-0.5" style={{ color: '#64748B' }}>
-              Case management — {INCIDENTS_DATA.length} incidents today
+              Case management — {data.length} incidents today
             </p>
           </div>
           <button
             className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-white"
             style={{ background: '#2F6B4F' }}
+            onClick={createManualIncident}
           >
             <FileCheck size={14} />
             Create Incident
           </button>
         </div>
+
+        {loading && <div className="text-sm mb-4" style={{ color: '#64748B' }}>Loading incidents...</div>}
+        {error && <div className="text-sm mb-4" style={{ color: '#D64545' }}>Failed to load incidents: {error}</div>}
 
         {/* Status filter pills */}
         <div className="flex items-center gap-2 mb-4">
@@ -186,14 +243,14 @@ export default function Incidents() {
 
             {/* Actions */}
             <div className="flex flex-col gap-2 pt-2" style={{ borderTop: '1px solid #F1F5F9' }}>
-              <button className="w-full py-2 rounded-lg text-sm font-medium text-white" style={{ background: '#D99000' }}>
+              <button className="w-full py-2 rounded-lg text-sm font-medium text-white" style={{ background: '#D99000' }} onClick={() => updateSelected({ status: 'escalated' })}>
                 Escalate Incident
               </button>
-              <button className="w-full py-2 rounded-lg text-sm font-medium" style={{ border: '1px solid #E2E8F0', color: '#64748B' }}>
+              <button className="w-full py-2 rounded-lg text-sm font-medium" style={{ border: '1px solid #E2E8F0', color: '#64748B' }} onClick={addNote}>
                 Add Note
               </button>
               {selected.status !== 'closed' && (
-                <button className="w-full py-2 rounded-lg text-sm font-medium" style={{ background: 'rgba(46,125,50,0.1)', color: '#2E7D32' }}>
+                <button className="w-full py-2 rounded-lg text-sm font-medium" style={{ background: 'rgba(46,125,50,0.1)', color: '#2E7D32' }} onClick={() => updateSelected({ status: 'closed' })}>
                   Close Incident
                 </button>
               )}

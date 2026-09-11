@@ -52,6 +52,11 @@ def process_night_check(
     current_time: datetime | None = None,
     start_hour: int = 20,
     end_hour: int = 6,
+    event_description: str | None = None,
+    event_type_label: str | None = None,
+    entity_type: str | None = None,
+    confidence: float | None = None,
+    severity: str = "normal",
 ):
     """Write one night condition event and promote its first threshold crossing."""
     night = is_night(current_time, start_hour, end_hour)
@@ -62,6 +67,11 @@ def process_night_check(
         zone_id=zone_id,
         timestamp=current_time or datetime.now(timezone.utc),
         metadata={"inside_zone": inside_zone, "is_night": night},
+        event_description=event_description,
+        event_type_label=event_type_label,
+        entity_type=entity_type,
+        confidence=confidence,
+        severity=severity,
     )
     if event_store:
         event = event_store.save_event(event)

@@ -1,6 +1,10 @@
-# Replace the example source with a local file in test_videos/ or an RTSP URL.
+# camera-car: vehicle detection and ANPR demo
+# camera-1:   person detection against the restricted zone in zones.yaml
 cameras:
+  - camera_id: camera-car
+    source: test_videos/car.mp4
+
   - camera_id: camera-1
-    source: test_videos/sample.mp4
+    source: test_videos/army.mp4
     zones:
       - border-zone-1

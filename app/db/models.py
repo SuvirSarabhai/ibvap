@@ -26,6 +26,13 @@ class EventModel(Base):
     timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
     event_metadata: Mapped[dict] = mapped_column("metadata", JSON, default=dict)
     evidence_path: Mapped[str | None] = mapped_column(Text, nullable=True)
+    event_description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    event_type_label: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    entity_type: Mapped[str | None] = mapped_column(String(30), nullable=True, index=True)
+    confidence: Mapped[float | None] = mapped_column(nullable=True)
+    threat_score: Mapped[int] = mapped_column(Integer, default=0)
+    severity: Mapped[str] = mapped_column(String(20), default="normal", index=True)
+    status: Mapped[str] = mapped_column(String(30), default="open", index=True)
     alerts: Mapped[list["AlertModel"]] = relationship(back_populates="event")
 
 
@@ -43,7 +50,34 @@ class AlertModel(Base):
     status: Mapped[str] = mapped_column(String(30), default="new", index=True)
     operator_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
     operator_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    entity_id: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
+    entity_type: Mapped[str | None] = mapped_column(String(30), nullable=True, index=True)
+    event_description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    event_type_label: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    threat_score: Mapped[int] = mapped_column(Integer, default=0)
+    zone_id: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
+    assigned_to: Mapped[str | None] = mapped_column(String(100), nullable=True)
     event: Mapped[EventModel] = relationship(back_populates="alerts")
+
+
+class IncidentModel(Base):
+    __tablename__ = "incidents"
+    __table_args__ = (Index("ix_incidents_status_severity", "status", "severity"),)
+
+    incident_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    alert_id: Mapped[str | None] = mapped_column(ForeignKey("alerts.alert_id"), nullable=True, index=True)
+    event_id: Mapped[str | None] = mapped_column(ForeignKey("events.event_id"), nullable=True, index=True)
+    incident_type: Mapped[str] = mapped_column(String(100))
+    entity_id: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
+    entity_type: Mapped[str | None] = mapped_column(String(30), nullable=True, index=True)
+    severity: Mapped[str] = mapped_column(String(20), default="normal", index=True)
+    camera_id: Mapped[str] = mapped_column(String(100), index=True)
+    zone_id: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
+    opened_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+    assigned_to: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    status: Mapped[str] = mapped_column(String(30), default="open", index=True)
+    evidence_count: Mapped[int] = mapped_column(Integer, default=0)
+    notes: Mapped[list] = mapped_column(JSON, default=list)
 
 
 class CameraModel(Base):

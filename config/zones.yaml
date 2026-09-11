@@ -7,5 +7,3 @@ zones:
       - [760, 429]   # bottom-right
       - [531, 428]     # top-right
     sensitivity: medium
-
-  

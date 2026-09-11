@@ -2,15 +2,32 @@
 
 from __future__ import annotations
 
+from datetime import timedelta
+
 from sqlalchemy import select
 
 from app.db.database import SessionLocal
-from app.db.models import AlertModel, WatchlistModel
+from app.db.models import AlertModel, EventModel, WatchlistModel
 from app.events.schema import Alert, Event
 from app.utils.logger import get_logger
+from app.utils.threat_score import compute_threat_score
 
 logger = get_logger(__name__)
-VALID_STATUSES = {"new", "acknowledged", "resolved", "false_positive"}
+VALID_STATUSES = {"new", "acknowledged", "resolved", "false_positive", "escalated"}
+ALERT_FIELDS = (
+    "alert_id", "event_id", "alert_type", "severity", "camera_id", "timestamp",
+    "evidence_path", "status", "operator_id", "operator_note", "entity_id",
+    "entity_type", "event_description", "event_type_label", "threat_score",
+    "zone_id", "assigned_to",
+)
+
+
+def _alert_from_row(row: AlertModel) -> Alert:
+    return Alert(**{field: getattr(row, field) for field in ALERT_FIELDS})
+
+
+def _entity_id(event: Event) -> str | None:
+    return str(event.metadata.get("entity_id") or event.metadata.get("plate") or event.track_id or "") or None
 
 
 class AlertManager:
@@ -26,21 +43,43 @@ class AlertManager:
         self.broadcaster = broadcaster
 
     def create_alert_from_event(self, event: Event, alert_type: str, severity: str = "medium") -> Alert:
-        alert = Alert(
-            event_id=event.event_id,
-            alert_type=alert_type,
-            severity=severity,
-            camera_id=event.camera_id,
-            timestamp=event.timestamp,
-            evidence_path=event.evidence_path,
-        )
+        event.severity = severity
         session = self.session_factory()
         try:
+            cutoff = event.timestamp - timedelta(minutes=10)
+            recent = session.scalars(
+                select(EventModel).where(
+                    EventModel.track_id == event.track_id,
+                    EventModel.timestamp >= cutoff,
+                    EventModel.timestamp <= event.timestamp,
+                    EventModel.zone_id.is_not(None),
+                )
+            ).all()
+            zones = {row.zone_id for row in recent if row.zone_id and row.zone_id != event.zone_id}
+            threat_score = compute_threat_score(
+                event,
+                is_restricted=self.is_restricted,
+                recent_zone_count=len(zones),
+            )
+            alert = Alert(
+                event_id=event.event_id,
+                alert_type=alert_type,
+                severity=severity,
+                camera_id=event.camera_id,
+                timestamp=event.timestamp,
+                evidence_path=event.evidence_path,
+                entity_id=_entity_id(event),
+                entity_type=event.entity_type,
+                event_description=event.event_description,
+                event_type_label=event.event_type_label,
+                threat_score=threat_score,
+                zone_id=event.zone_id,
+            )
             row = AlertModel(**alert.model_dump())
             session.add(row)
             session.commit()
             session.refresh(row)
-            alert = Alert.model_validate(row)
+            alert = _alert_from_row(row)
         except Exception:
             session.rollback()
             logger.exception("Could not create alert for event %s", event.event_id)
@@ -57,6 +96,7 @@ class AlertManager:
         new_status: str,
         operator_id: str | None = None,
         operator_note: str | None = None,
+        assigned_to: str | None = None,
     ) -> Alert | None:
         if new_status not in VALID_STATUSES:
             raise ValueError(f"Unsupported alert status: {new_status}")
@@ -68,24 +108,15 @@ class AlertManager:
             row.status = new_status
             row.operator_id = operator_id
             row.operator_note = operator_note
+            if assigned_to is not None:
+                row.assigned_to = assigned_to
             session.commit()
             session.refresh(row)
-            return Alert(
-                alert_id=row.alert_id,
-                event_id=row.event_id,
-                alert_type=row.alert_type,
-                severity=row.severity,
-                camera_id=row.camera_id,
-                timestamp=row.timestamp,
-                evidence_path=row.evidence_path,
-                status=row.status,
-                operator_id=row.operator_id,
-                operator_note=row.operator_note,
-            )
+            return _alert_from_row(row)
         finally:
             session.close()
 
-    def get_alerts(self, status=None, severity=None, page=1, page_size=50) -> list[Alert]:
+    def get_alerts(self, status=None, severity=None, entity_type=None, threat_score_min=None, page=1, page_size=50) -> list[Alert]:
         session = self.session_factory()
         try:
             query = select(AlertModel).order_by(AlertModel.timestamp.desc())
@@ -93,11 +124,30 @@ class AlertManager:
                 query = query.where(AlertModel.status == status)
             if severity:
                 query = query.where(AlertModel.severity == severity)
+            if entity_type:
+                query = query.where(AlertModel.entity_type == entity_type)
+            if threat_score_min is not None:
+                query = query.where(AlertModel.threat_score >= threat_score_min)
             size = min(max(1, page_size), 200)
             query = query.offset((max(1, page) - 1) * size).limit(size)
-            return [Alert.model_validate(row) for row in session.scalars(query).all()]
+            return [_alert_from_row(row) for row in session.scalars(query).all()]
         finally:
             session.close()
+
+    def update_alert(self, alert_id: str, assigned_to: str | None = None) -> Alert | None:
+        session = self.session_factory()
+        try:
+            row = session.get(AlertModel, alert_id)
+            if row is None:
+                return None
+            row.assigned_to = assigned_to
+            session.commit()
+            session.refresh(row)
+            return _alert_from_row(row)
+        finally:
+            session.close()
+
+
 
     def is_restricted(self, plate: str) -> bool:
         session = self.session_factory()

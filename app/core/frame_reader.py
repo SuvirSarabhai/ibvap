@@ -27,6 +27,7 @@ class LatestFrameReader:
         self._opened = False
         self._finished = False
         self._sequence = 0
+        self._loop_count = 0
 
     def start(self) -> "LatestFrameReader":
         if self._thread and self._thread.is_alive():
@@ -64,6 +65,7 @@ class LatestFrameReader:
                     self._finished = True
                     break
                 # Local file — loop back to the start for continuous testing.
+                self._loop_count += 1
                 self._capture.set(cv2.CAP_PROP_POS_FRAMES, 0)
                 continue
             with self._lock:
@@ -74,6 +76,11 @@ class LatestFrameReader:
     @property
     def finished(self) -> bool:
         return self._finished
+
+    @property
+    def loop_count(self) -> int:
+        """How many times the local video has looped. Always 0 for live streams."""
+        return self._loop_count
 
     @property
     def frame_sequence(self) -> int:

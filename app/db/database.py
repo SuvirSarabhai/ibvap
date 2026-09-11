@@ -11,7 +11,7 @@ from __future__ import annotations
 import os
 from collections.abc import Generator
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from app.utils.paths import DATABASE_PATH
@@ -46,3 +46,32 @@ def init_db() -> None:
     from app.db import models  # noqa: F401
 
     Base.metadata.create_all(bind=engine)
+    # create_all does not alter existing installations; add only the new nullable columns.
+    additions = {
+        "events": {
+            "event_description": "TEXT",
+            "event_type_label": "VARCHAR(100)",
+            "entity_type": "VARCHAR(30)",
+            "confidence": "FLOAT",
+            "threat_score": "INTEGER DEFAULT 0",
+            "severity": "VARCHAR(20) DEFAULT 'normal'",
+            "status": "VARCHAR(30) DEFAULT 'open'",
+        },
+        "alerts": {
+            "entity_id": "VARCHAR(100)",
+            "entity_type": "VARCHAR(30)",
+            "event_description": "TEXT",
+            "event_type_label": "VARCHAR(100)",
+            "threat_score": "INTEGER DEFAULT 0",
+            "zone_id": "VARCHAR(100)",
+            "assigned_to": "VARCHAR(100)",
+        },
+    }
+    with engine.begin() as connection:
+        inspector = inspect(connection)
+        for table, columns in additions.items():
+            existing = {column["name"] for column in inspector.get_columns(table)}
+            for name, definition in columns.items():
+                if name not in existing:
+                    connection.execute(text(f'ALTER TABLE "{table}" ADD COLUMN "{name}" {definition}'))
+                    existing.add(name)

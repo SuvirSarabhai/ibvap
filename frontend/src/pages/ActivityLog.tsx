@@ -1,7 +1,9 @@
-import { useState } from 'react'
-import { Search, Filter, ChevronDown, ArrowUpRight, Clock, User, Car } from 'lucide-react'
-import { ACTIVITY_DATA, type ActivityRow } from '../data/mockData'
+import { useEffect, useState } from 'react'
+import { Search, ChevronDown, ArrowUpRight, User, Car, ImageIcon } from 'lucide-react'
+import { getEvents } from '../api/client'
+import type { ActivityRow } from '../data/mockData'
 import SeverityBadge from '../components/SeverityBadge'
+import EventDetailPanel from '../components/EventDetailPanel'
 
 const EVENT_TYPES = [
   'All', 'Detections', 'Zone Entry', 'Loitering', 'ANPR', 'Suspicious', 'Camera Events', 'Operator Actions',
@@ -58,8 +60,21 @@ export default function ActivityLog({ onSelectEntity }: Props) {
   const [severity, setSeverity] = useState('All')
   const [entityFilter, setEntityFilter] = useState('All')
   const [hoveredRow, setHoveredRow] = useState<string | null>(null)
+  const [data, setData] = useState<ActivityRow[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [selectedEventId, setSelectedEventId] = useState<string | null>(null)
 
-  const filtered = ACTIVITY_DATA.filter((row) => {
+  useEffect(() => {
+    let mounted = true
+    getEvents({ camera_id: camera, severity })
+      .then((rows) => { if (mounted) setData(rows) })
+      .catch((err) => { if (mounted) setError(err instanceof Error ? err.message : 'Unable to load events') })
+      .finally(() => { if (mounted) setLoading(false) })
+    return () => { mounted = false }
+  }, [camera, severity])
+
+  const filtered = data.filter((row) => {
     if (search && !row.event.toLowerCase().includes(search.toLowerCase()) &&
         !row.entityId.toLowerCase().includes(search.toLowerCase())) return false
     if (eventType !== 'All' && row.eventType !== eventType) return false
@@ -72,13 +87,14 @@ export default function ActivityLog({ onSelectEntity }: Props) {
 
   return (
     <div className="p-8">
+      <EventDetailPanel eventId={selectedEventId} onClose={() => setSelectedEventId(null)} />
       {/* Header */}
       <div className="mb-6">
         <h1 className="text-xl font-semibold" style={{ color: '#17212B' }}>
           Activity Log
         </h1>
         <p className="text-sm mt-0.5" style={{ color: '#64748B' }}>
-          Unified event stream — people, vehicles, system events · {ACTIVITY_DATA.length} records today
+          Unified event stream — people, vehicles, system events · {data.length} records today
         </p>
       </div>
 
@@ -130,7 +146,7 @@ export default function ActivityLog({ onSelectEntity }: Props) {
         </div>
 
         <div className="ml-auto text-xs" style={{ color: '#94A3B8' }}>
-          {filtered.length} of {ACTIVITY_DATA.length} events
+          {filtered.length} of {data.length} events
         </div>
       </div>
 
@@ -171,7 +187,7 @@ export default function ActivityLog({ onSelectEntity }: Props) {
               row={row}
               hovered={hoveredRow === row.id}
               onHover={setHoveredRow}
-              onSelect={onSelectEntity}
+              onSelect={(id) => setSelectedEventId(id)}
             />
           ))
         )}
@@ -189,7 +205,7 @@ function ActivityRow({
   onSelect: (id: string) => void
 }) {
   const statusStyle = STATUS_STYLES[row.status] ?? STATUS_STYLES.closed
-  const canClick = row.entityId !== '—'
+  const canClick = true  // every event is clickable — details panel handles missing data
 
   return (
     <div
@@ -198,11 +214,11 @@ function ActivityRow({
         gridTemplateColumns: '100px 1fr 80px 180px 80px 90px 80px 90px',
         borderBottom: '1px solid #F8FAFC',
         background: hovered ? '#F8FAFD' : 'transparent',
-        cursor: canClick ? 'pointer' : 'default',
+        cursor: 'pointer',
       }}
       onMouseEnter={() => onHover(row.id)}
       onMouseLeave={() => onHover(null)}
-      onClick={() => canClick && onSelect(row.entityId)}
+      onClick={() => onSelect(row.id)}
     >
       {/* Time */}
       <div className="flex flex-col gap-0.5">
@@ -216,10 +232,32 @@ function ActivityRow({
 
       {/* Event */}
       <div className="flex items-center gap-2 min-w-0">
-        <span className="text-sm truncate" style={{ color: '#17212B' }}>
-          {row.event}
-        </span>
-        {hovered && canClick && (
+        <div className="flex flex-col gap-0.5 min-w-0 flex-1">
+          <span className="text-sm truncate" style={{ color: '#17212B' }}>
+            {row.event}
+          </span>
+          {row.evidencePath && (
+            <span className="flex items-center gap-1 text-xs" style={{ color: '#167D7F' }}>
+              <ImageIcon size={10} />
+              snapshot saved
+            </span>
+          )}
+        </div>
+        {hovered && row.evidencePath && (
+          <img
+            src={row.evidencePath}
+            alt="evidence"
+            style={{
+              width: 72,
+              height: 40,
+              objectFit: 'cover',
+              borderRadius: 4,
+              border: '1px solid #E2E8F0',
+              flexShrink: 0,
+            }}
+          />
+        )}
+        {hovered && canClick && !row.evidencePath && (
           <ArrowUpRight size={13} style={{ color: '#167D7F', flexShrink: 0 }} />
         )}
       </div>
@@ -228,11 +266,11 @@ function ActivityRow({
       <div>
         {row.entityId !== '—' ? (
           <div className="flex items-center gap-1">
-            {row.entityType === 'person' ? (
+            {row.entityType === 'vehicle' ? (
+              <Car size={11} style={{ color: '#2F6B4F' }} />
+            ) : row.entityType === 'person' ? (
               <User size={11} style={{ color: '#64748B' }} />
-            ) : (
-              <Car size={11} style={{ color: '#64748B' }} />
-            )}
+            ) : null}
             <span className="font-mono text-xs font-medium" style={{ color: '#17212B' }}>
               {row.entityId}
             </span>
