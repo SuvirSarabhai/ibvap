@@ -66,6 +66,12 @@ def init_db() -> None:
             "zone_id": "VARCHAR(100)",
             "assigned_to": "VARCHAR(100)",
         },
+        "personnel": {
+            "display_name": "VARCHAR(200) DEFAULT ''",
+            "active": "BOOLEAN DEFAULT TRUE",
+            "created_at": "TIMESTAMP",
+            "updated_at": "TIMESTAMP",
+        },
     }
     with engine.begin() as connection:
         inspector = inspect(connection)
@@ -75,3 +81,7 @@ def init_db() -> None:
                 if name not in existing:
                     connection.execute(text(f'ALTER TABLE "{table}" ADD COLUMN "{name}" {definition}'))
                     existing.add(name)
+        # Existing prototype personnel rows predate the recognition fields. Backfill
+        # them so old records remain active after the additive migration.
+        if "personnel" in additions:
+            connection.execute(text('UPDATE "personnel" SET "active" = TRUE WHERE "active" IS NULL'))

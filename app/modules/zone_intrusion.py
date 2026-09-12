@@ -1,24 +1,23 @@
-"""Zone intrusion geometry and event-promotion helpers."""
+"""Zone intrusion geometry and authorization-gated event promotion."""
 
 from __future__ import annotations
 
-from typing import Iterable
+from datetime import datetime, timezone
+from typing import Any, Callable, Iterable
 
 import cv2
 import numpy as np
 
-from datetime import datetime, timezone
-
-from app.events.schema import Event
-
-
 from app.core.detector import Detection
 from app.core.incident_tracker import IncidentTracker
+from app.events.schema import Event
+from app.modules.authorization import authorization_reason, check_authorization
+from app.utils.image_utils import save_evidence_snapshot
 
 
 def check_zone(track_id: str, bbox: Iterable[float], zone_polygon: list[list[float]]) -> bool:
     """Check the center of a tracked bbox against a configured polygon."""
-    del track_id  # Track identity is used by the caller's persistence state.
+    del track_id
     x1, y1, x2, y2 = bbox
     center = ((float(x1) + float(x2)) / 2, (float(y1) + float(y2)) / 2)
     polygon = np.asarray(zone_polygon, dtype=np.float32).reshape((-1, 1, 2))
@@ -40,6 +39,9 @@ def process_detection(
     entity_type: str | None = None,
     confidence: float | None = None,
     severity: str = "normal",
+    face_match_result: dict[str, Any] | None = None,
+    face_matcher: Callable | None = None,
+    authorization_checker: Callable = check_authorization,
 ):
     """Persist one check and promote only when continuous entry is established."""
     inside = check_zone(detection.track_id, detection.bbox, zone_polygon)
@@ -55,9 +57,8 @@ def process_detection(
         entity_type=entity_type,
         confidence=confidence,
         severity=severity,
+        evidence_path=save_evidence_snapshot(frame, detection.bbox, "zone-check", detection.track_id),
     )
-    if event_store:
-        event = event_store.save_event(event)
     promoted = tracker.check_persistence(
         detection.track_id,
         f"zone_intrusion:{zone_id}",
@@ -65,6 +66,27 @@ def process_detection(
         frame_threshold=frame_threshold,
     )
     alert = None
-    if promoted and alert_manager:
-        alert = alert_manager.create_alert_from_event(event, "zone_intrusion", "medium")
+    alert_args = None
+    if promoted and entity_type == "person":
+        matched = face_match_result
+        if matched is None and face_matcher:
+            matched = face_matcher(detection.track_id, frame, detection.bbox)
+        authorization = authorization_checker(detection.track_id, zone_id, matched)
+        event.metadata.update(
+            {
+                "authorization_outcome": authorization["outcome"],
+                "person_id": authorization["person_id"],
+            }
+        )
+        reason = authorization_reason(authorization["outcome"])
+        if reason:
+            event.event_description = reason
+        if authorization["outcome"] != "authorized":
+            alert_args = ("zone_intrusion", "high" if authorization["outcome"] == "unresolved" else "medium")
+    elif promoted:
+        alert_args = ("zone_intrusion", "medium")
+    if event_store:
+        event = event_store.save_event(event)
+    if alert_args and alert_manager:
+        alert = alert_manager.create_alert_from_event(event, *alert_args)
     return event, alert

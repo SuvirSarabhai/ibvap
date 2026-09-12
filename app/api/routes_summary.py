@@ -8,7 +8,8 @@ from fastapi import APIRouter
 from sqlalchemy import func, select
 
 from app.db.database import SessionLocal
-from app.db.models import AlertModel, CameraModel, IncidentModel
+from app.db.models import AlertModel, IncidentModel
+from app.pipeline.orchestrator import get_camera_status, load_camera_config
 
 router = APIRouter(prefix="/api", tags=["summary"])
 
@@ -17,8 +18,13 @@ router = APIRouter(prefix="/api", tags=["summary"])
 def get_summary():
     session = SessionLocal()
     try:
-        cameras_total = session.scalar(select(func.count()).select_from(CameraModel)) or 0
-        cameras_online = session.scalar(select(func.count()).select_from(CameraModel).where(CameraModel.status == "online")) or 0
+        configured_cameras = load_camera_config()
+        configured_ids = {str(camera.get("camera_id", "camera-unknown")) for camera in configured_cameras}
+        camera_status = get_camera_status()
+        cameras_total = len(configured_ids) or len(camera_status)
+        cameras_online = sum(1 for camera in camera_status if camera.get("status") == "online")
+        if not configured_ids:
+            cameras_online = 0
         active_subquery = select(AlertModel).where(AlertModel.status.in_(["new", "acknowledged"])).subquery()
         high = session.scalar(select(func.count()).select_from(active_subquery).where(active_subquery.c.severity == "high")) or 0
         medium = session.scalar(select(func.count()).select_from(active_subquery).where(active_subquery.c.severity == "medium")) or 0

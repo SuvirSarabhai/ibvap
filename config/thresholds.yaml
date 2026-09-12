@@ -1,2 +1,14 @@
 zone_intrusion_frames: 5
 night_duration_seconds: 5
+loiter_threshold_seconds: 15
+dwell_threshold_seconds: 15
+moving_speed_threshold: 5
+night_start_hour: 20
+night_end_hour: 6
+face_recognition:
+  enabled: true
+  model_name: "buffalo_l"
+  similarity_threshold: 0.55
+  min_face_size_px: 40
+  blur_threshold: 100.0
+  detection_confidence_threshold: 0.5

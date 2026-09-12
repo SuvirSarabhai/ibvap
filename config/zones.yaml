@@ -7,3 +7,7 @@ zones:
       - [760, 429]   # bottom-right
       - [531, 428]     # top-right
     sensitivity: medium
+    sensitive: true
+    loiter_threshold_seconds: 15
+    moving_speed_threshold: 5
+    dwell_threshold_seconds: 15

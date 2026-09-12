@@ -1,22 +1,62 @@
-import { useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { WifiOff, Wifi, AlertTriangle, ChevronDown, Wrench, Maximize2 } from 'lucide-react'
-import { CAMERA_FLEET } from '../data/mockData'
+import { getCameras, API_BASE_URL } from '../api/client'
 import VideoLightbox from '../components/VideoLightbox'
 
-const ZONES = ['All', 'Zone A', 'Zone B', 'Zone C', 'Zone D', 'Zone E', 'Zone F', 'Zone G']
+interface CameraView {
+  id: string
+  name: string
+  zone: string
+  status: 'online' | 'offline' | 'degraded' | 'maintenance'
+  uptimePct: number
+  lastEvent: string
+  lastEventTime: string
+  severity: 'high' | 'medium' | 'normal'
+  signalStrength: number
+  resolution: string
+  fps: number
+  source: string | null
+}
+
+interface BackendCamera {
+  camera_id: string
+  source?: string | null
+  zones?: string[]
+  status?: string
+}
+
 const GRID_SIZES = [
   { label: '2×3', cols: 3 },
   { label: '3×4', cols: 4 },
   { label: '4×6', cols: 6 },
 ] as const
 
-// Real video files from test_videos/ — served by FastAPI /api/stream/:filename
-const API_BASE = 'http://localhost:8000'
-const VIDEO_SOURCES = [
-  `${API_BASE}/api/stream/zone.mp4`,
-  `${API_BASE}/api/stream/sample.mp4`,
-  `${API_BASE}/api/stream/car.mp4`,
-]
+const normalizeStatus = (status: string | undefined): CameraView['status'] =>
+  status === 'online' || status === 'degraded' || status === 'maintenance' ? status : 'offline'
+
+const cameraName = (id: string) =>
+  id.replace(/[-_]/g, ' ').replace(/\b\w/g, char => char.toUpperCase())
+
+const streamUrl = (source: string | null | undefined) => {
+  if (!source) return null
+  const filename = source.replaceAll('\\', '/').split('/').pop()
+  return filename ? `${API_BASE_URL}/api/stream/${encodeURIComponent(filename)}` : null
+}
+
+const toCameraView = (camera: BackendCamera): CameraView => ({
+  id: camera.camera_id,
+  name: cameraName(camera.camera_id),
+  zone: camera.zones?.join(', ') || 'Unassigned',
+  status: normalizeStatus(camera.status),
+  uptimePct: 0,
+  lastEvent: 'No events',
+  lastEventTime: '--:--',
+  severity: 'normal',
+  signalStrength: 0,
+  resolution: 'Unknown',
+  fps: 0,
+  source: camera.source || null,
+})
 
 const sevDot = (sev: string) => {
   if (sev === 'high') return '#D64545'
@@ -25,24 +65,37 @@ const sevDot = (sev: string) => {
 }
 
 export default function LiveMonitoring() {
+  const [cameras, setCameras] = useState<CameraView[]>([])
   const [zone, setZone] = useState('All')
   const [statusFilter, setStatusFilter] = useState('All')
   const [gridIdx, setGridIdx] = useState(0)
   const [hoveredCam, setHoveredCam] = useState<string | null>(null)
-  const [selectedCam, setSelectedCam] = useState<{ cam: typeof CAMERA_FLEET[0]; src: string } | null>(null)
+  const [selectedCam, setSelectedCam] = useState<{ cam: CameraView; src: string | null } | null>(null)
+
+  useEffect(() => {
+    let active = true
+    getCameras()
+      .then(rows => {
+        if (active) setCameras((rows as BackendCamera[]).map(toCameraView))
+      })
+      .catch(() => {
+        if (active) setCameras([])
+      })
+    return () => { active = false }
+  }, [])
 
   const cols = GRID_SIZES[gridIdx].cols
-
-  const filtered = CAMERA_FLEET.filter((c) => {
-    if (zone !== 'All' && c.zone !== zone) return false
-    if (statusFilter !== 'All' && c.status !== statusFilter.toLowerCase()) return false
+  const zones = useMemo(() => ['All', ...Array.from(new Set(cameras.flatMap(camera => camera.zone.split(', ')).filter(Boolean)))], [cameras])
+  const filtered = cameras.filter((camera) => {
+    if (zone !== 'All' && camera.zone !== zone) return false
+    if (statusFilter !== 'All' && camera.status !== statusFilter.toLowerCase()) return false
     return true
   })
 
-  const online = CAMERA_FLEET.filter((c) => c.status === 'online').length
-  const offline = CAMERA_FLEET.filter((c) => c.status === 'offline').length
-  const degraded = CAMERA_FLEET.filter((c) => c.status === 'degraded').length
-  const maintenance = CAMERA_FLEET.filter((c) => c.status === 'maintenance').length
+  const online = cameras.filter(camera => camera.status === 'online').length
+  const offline = cameras.filter(camera => camera.status === 'offline').length
+  const degraded = cameras.filter(camera => camera.status === 'degraded').length
+  const maintenance = cameras.filter(camera => camera.status === 'maintenance').length
 
   return (
     <div className="p-8">
@@ -58,7 +111,7 @@ export default function LiveMonitoring() {
             Live Monitoring
           </h1>
           <p className="text-sm mt-0.5" style={{ color: '#64748B' }}>
-            Zone Alpha Sector · {CAMERA_FLEET.length} cameras · Real-time feeds
+            Zone Alpha Sector · {cameras.length} cameras · Real-time feeds
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -97,35 +150,35 @@ export default function LiveMonitoring() {
             className="appearance-none pl-3 pr-7 py-1.5 rounded-lg text-xs border outline-none cursor-pointer"
             style={{ background: '#fff', border: '1px solid #E2E8F0', color: '#17212B', fontFamily: 'inherit' }}
           >
-            {ZONES.map((z) => <option key={z} value={z}>{z === 'All' ? 'Zone: All' : z}</option>)}
+            {zones.map((item) => <option key={item} value={item}>{item === 'All' ? 'Zone: All' : item}</option>)}
           </select>
           <ChevronDown size={11} className="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none" style={{ color: '#94A3B8' }} />
         </div>
 
         {/* Status filter */}
         <div className="flex rounded-lg overflow-hidden" style={{ border: '1px solid #E2E8F0' }}>
-          {['All', 'Online', 'Offline', 'Degraded', 'Maintenance'].map((s, i, arr) => (
+          {['All', 'Online', 'Offline', 'Degraded', 'Maintenance'].map((status, i, arr) => (
             <button
-              key={s}
-              onClick={() => setStatusFilter(s)}
+              key={status}
+              onClick={() => setStatusFilter(status)}
               className="px-3 py-1.5 text-xs transition-colors"
               style={{
-                background: statusFilter === s ? '#2F6B4F' : '#fff',
-                color: statusFilter === s ? '#fff' : '#64748B',
-                fontWeight: statusFilter === s ? 500 : 400,
+                background: statusFilter === status ? '#2F6B4F' : '#fff',
+                color: statusFilter === status ? '#fff' : '#64748B',
+                fontWeight: statusFilter === status ? 500 : 400,
                 borderRight: i < arr.length - 1 ? '1px solid #E2E8F0' : 'none',
               }}
             >
-              {s}
+              {status}
             </button>
           ))}
         </div>
 
         {/* Grid size toggle */}
         <div className="ml-auto flex items-center gap-1 rounded-lg overflow-hidden" style={{ border: '1px solid #E2E8F0' }}>
-          {GRID_SIZES.map((g, i) => (
+          {GRID_SIZES.map((grid, i) => (
             <button
-              key={g.label}
+              key={grid.label}
               onClick={() => setGridIdx(i)}
               className="px-3 py-1.5 text-xs transition-colors"
               style={{
@@ -134,7 +187,7 @@ export default function LiveMonitoring() {
                 borderRight: i < GRID_SIZES.length - 1 ? '1px solid #E2E8F0' : 'none',
               }}
             >
-              {g.label}
+              {grid.label}
             </button>
           ))}
         </div>
@@ -147,30 +200,29 @@ export default function LiveMonitoring() {
         className="grid gap-2"
         style={{ gridTemplateColumns: `repeat(${cols}, 1fr)` }}
       >
-        {filtered.map((cam, idx) => {
-          const videoSrc = VIDEO_SOURCES[idx % VIDEO_SOURCES.length]
-          const isOffline = cam.status === 'offline' || cam.status === 'maintenance'
-          const hovered = hoveredCam === cam.id
+        {filtered.map((camera) => {
+          const videoSrc = streamUrl(camera.source)
+          const isOffline = camera.status === 'offline' || camera.status === 'maintenance'
+          const hovered = hoveredCam === camera.id
           return (
             <div
-              key={cam.id}
+              key={camera.id}
               className="relative overflow-hidden rounded-xl cursor-pointer group"
               style={{
                 aspectRatio: '16/9',
                 background: '#0f1923',
-                border: cam.status === 'offline'
+                border: camera.status === 'offline'
                   ? '1.5px solid rgba(214,69,69,0.4)'
-                  : cam.status === 'degraded'
+                  : camera.status === 'degraded'
                   ? '1.5px solid rgba(217,144,0,0.4)'
                   : '1.5px solid transparent',
                 boxShadow: hovered ? '0 0 0 2px #2F6B4F' : 'none',
                 transition: 'box-shadow 0.15s',
               }}
-              onMouseEnter={() => setHoveredCam(cam.id)}
+              onMouseEnter={() => setHoveredCam(camera.id)}
               onMouseLeave={() => setHoveredCam(null)}
-              onClick={() => setSelectedCam({ cam, src: videoSrc })}
+              onClick={() => setSelectedCam({ cam: camera, src: videoSrc })}
             >
-              {/* Expand hint on hover */}
               {hovered && (
                 <div
                   className="absolute top-2 right-2 z-10 flex items-center gap-1 px-1.5 py-1 rounded-md"
@@ -182,14 +234,14 @@ export default function LiveMonitoring() {
               )}
               {isOffline ? (
                 <div className="w-full h-full flex flex-col items-center justify-center" style={{ background: '#0f1923' }}>
-                  {cam.status === 'maintenance'
+                  {camera.status === 'maintenance'
                     ? <Wrench size={20} style={{ color: '#64748B' }} />
                     : <WifiOff size={20} style={{ color: '#64748B' }} />}
                   <span className="text-xs mt-1.5 font-medium" style={{ color: '#64748B' }}>
-                    {cam.status === 'maintenance' ? 'Maintenance' : 'No Signal'}
+                    {camera.status === 'maintenance' ? 'Maintenance' : 'No Signal'}
                   </span>
                 </div>
-              ) : (
+              ) : videoSrc ? (
                 <video
                   key={videoSrc}
                   src={videoSrc}
@@ -198,69 +250,44 @@ export default function LiveMonitoring() {
                   muted
                   playsInline
                   className="w-full h-full object-cover"
-                  style={{
-                    filter: cam.status === 'degraded' ? 'brightness(0.7) saturate(0.5)' : 'none',
-                  }}
+                  style={{ filter: camera.status === 'degraded' ? 'brightness(0.7) saturate(0.5)' : 'none' }}
                 />
+              ) : (
+                <div className="w-full h-full flex flex-col items-center justify-center" style={{ background: '#0f1923' }}>
+                  <WifiOff size={20} style={{ color: '#64748B' }} />
+                  <span className="text-xs mt-1.5 font-medium" style={{ color: '#64748B' }}>No Stream</span>
+                </div>
               )}
 
-              {/* Gradient overlay */}
-              <div
-                className="absolute inset-0"
-                style={{ background: 'linear-gradient(to top, rgba(0,0,0,0.75) 0%, transparent 55%)' }}
-              />
+              <div className="absolute inset-0" style={{ background: 'linear-gradient(to top, rgba(0,0,0,0.75) 0%, transparent 55%)' }} />
 
-              {/* Top indicators */}
               <div className="absolute top-2 left-2 right-2 flex items-center justify-between">
-                {cam.status === 'online' && (
-                  <span
-                    className="text-white font-semibold rounded px-1"
-                    style={{ background: '#D64545', fontSize: 9, letterSpacing: '0.05em' }}
-                  >
-                    LIVE
-                  </span>
+                {camera.status === 'online' && (
+                  <span className="text-white font-semibold rounded px-1" style={{ background: '#D64545', fontSize: 9, letterSpacing: '0.05em' }}>LIVE</span>
                 )}
-                {cam.status === 'degraded' && (
-                  <span
-                    className="font-semibold rounded px-1"
-                    style={{ background: 'rgba(217,144,0,0.9)', color: '#fff', fontSize: 9 }}
-                  >
-                    DEGRADED
-                  </span>
+                {camera.status === 'degraded' && (
+                  <span className="font-semibold rounded px-1" style={{ background: 'rgba(217,144,0,0.9)', color: '#fff', fontSize: 9 }}>DEGRADED</span>
                 )}
-                {(cam.status === 'offline' || cam.status === 'maintenance') && <span />}
-
+                {(camera.status === 'offline' || camera.status === 'maintenance') && <span />}
                 <span
                   className="w-2 h-2 rounded-full"
-                  style={{
-                    background: sevDot(cam.severity),
-                    boxShadow: cam.severity === 'high' ? `0 0 5px ${sevDot(cam.severity)}` : 'none',
-                  }}
+                  style={{ background: sevDot(camera.severity), boxShadow: camera.severity === 'high' ? `0 0 5px ${sevDot(camera.severity)}` : 'none' }}
                 />
               </div>
 
-              {/* Alert overlay on hover */}
-              {hovered && cam.severity === 'high' && (
-                <div
-                  className="absolute top-7 left-2 flex items-center gap-1 px-2 py-1 rounded-md"
-                  style={{ background: 'rgba(214,69,69,0.85)' }}
-                >
+              {hovered && camera.severity === 'high' && (
+                <div className="absolute top-7 left-2 flex items-center gap-1 px-2 py-1 rounded-md" style={{ background: 'rgba(214,69,69,0.85)' }}>
                   <AlertTriangle size={10} className="text-white" />
                   <span className="text-white text-xs font-semibold" style={{ fontSize: 10 }}>Active Alert</span>
                 </div>
               )}
 
-              {/* Bottom info */}
               <div className="absolute bottom-0 left-0 right-0 px-2 pb-2">
-                <div className="font-mono text-xs font-semibold" style={{ color: '#fff', fontSize: 10, lineHeight: '14px' }}>
-                  {cam.id}
-                </div>
-                <div className="text-xs truncate" style={{ color: 'rgba(255,255,255,0.75)', fontSize: 10 }}>
-                  {cam.name}
-                </div>
+                <div className="font-mono text-xs font-semibold" style={{ color: '#fff', fontSize: 10, lineHeight: '14px' }}>{camera.id}</div>
+                <div className="text-xs truncate" style={{ color: 'rgba(255,255,255,0.75)', fontSize: 10 }}>{camera.name}</div>
                 {hovered && (
                   <div className="text-xs mt-0.5 truncate" style={{ color: 'rgba(255,255,255,0.55)', fontSize: 10 }}>
-                    {cam.lastEvent} · {cam.lastEventTime}
+                    {camera.lastEvent} · {camera.lastEventTime}
                   </div>
                 )}
               </div>

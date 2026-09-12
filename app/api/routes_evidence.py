@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from urllib.parse import unquote
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
@@ -15,10 +16,16 @@ _EVIDENCE_DIR = Path(__file__).resolve().parents[2] / "evidence"
 @router.get("/{filename}")
 def get_evidence(filename: str):
     """Return a saved evidence snapshot image."""
-    if "/" in filename or "\\" in filename or ".." in filename:
+    decoded_filename = unquote(filename)
+    if "/" in decoded_filename or "\\" in decoded_filename or ".." in decoded_filename:
         raise HTTPException(status_code=400, detail="Invalid filename")
 
-    path = _EVIDENCE_DIR / filename
+    evidence_root = _EVIDENCE_DIR.resolve()
+    path = (evidence_root / decoded_filename).resolve()
+    try:
+        path.relative_to(evidence_root)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid filename")
     if not path.exists() or not path.is_file():
         raise HTTPException(status_code=404, detail="Evidence file not found")
 

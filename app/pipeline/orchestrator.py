@@ -7,7 +7,26 @@ from pathlib import Path
 
 import yaml
 
+from app.db.database import SessionLocal
+from app.db.models import CameraModel
 from app.pipeline.camera_worker import CameraWorker
+
+
+def sync_camera_models(cameras: list[dict] | None = None) -> None:
+    """Upsert configured cameras so summary counts match the active config."""
+    session = SessionLocal()
+    try:
+        for camera in cameras if cameras is not None else load_camera_config():
+            camera_id = str(camera.get("camera_id", "camera-unknown"))
+            source = str(camera.get("source", ""))
+            row = session.get(CameraModel, camera_id)
+            if row is None:
+                session.add(CameraModel(camera_id=camera_id, source=source, status="offline"))
+            elif row.source != source:
+                row.source = source
+        session.commit()
+    finally:
+        session.close()
 from app.utils.paths import CONFIG_DIR, REPOSITORY_ROOT
 
 _workers: dict[str, CameraWorker] = {}

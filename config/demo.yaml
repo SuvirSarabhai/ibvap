@@ -1,0 +1,27 @@
+# Named border-security demonstration profiles. Production defaults remain in thresholds.yaml.
+profiles:
+  baseline:
+    thresholds: {}
+  zone_intrusion:
+    thresholds:
+      zone_intrusion_frames: 3
+  authorized_access:
+    thresholds:
+      zone_intrusion_frames: 3
+  unauthorized_access:
+    thresholds:
+      zone_intrusion_frames: 3
+  loitering:
+    thresholds:
+      loiter_threshold_seconds: 5
+  night_mode:
+    thresholds:
+      night_duration_seconds: 3
+  anpr:
+    thresholds: {}
+  watchlist_vehicle:
+    thresholds: {}
+  vehicle_dwell:
+    thresholds:
+      # Short enough for a live demonstration; production zones keep their values.
+      dwell_threshold_seconds: 9

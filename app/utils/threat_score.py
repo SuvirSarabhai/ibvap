@@ -17,6 +17,12 @@ def compute_threat_score(
     score = 0
     if event.event_type == "zone_intrusion":
         score += 30
+    if event.event_type == "loitering" and event.metadata.get("authorization_outcome") == "unauthorized":
+        score += 15
+    if event.metadata.get("authorization_outcome") == "unresolved":
+        score += 10
+    if event.event_type == "vehicle_dwell_sensitive_zone":
+        score += 20
     if event.severity == "high":
         score += 20
     elif event.severity == "medium":

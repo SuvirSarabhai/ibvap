@@ -22,7 +22,7 @@ PLATE_PATTERNS = (
 
 
 class PlateVoter:
-    def __init__(self, max_reads: int = 10, minimum_reads: int = 2):
+    def __init__(self, max_reads: int = 10, minimum_reads: int = 3):
         self.max_reads = max_reads
         self.minimum_reads = minimum_reads
         self._buffers: dict[str, deque[str]] = {}

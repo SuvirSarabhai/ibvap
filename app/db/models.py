@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from sqlalchemy import DateTime, ForeignKey, Index, Integer, JSON, String, Text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, JSON, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.database import Base
@@ -95,6 +95,34 @@ class ZoneModel(Base):
     camera_id: Mapped[str] = mapped_column(String(100), index=True)
     polygon: Mapped[list] = mapped_column(JSON)
     sensitivity: Mapped[str] = mapped_column(String(20), default="medium")
+
+
+class PersonnelModel(Base):
+    __tablename__ = "personnel"
+
+    person_id: Mapped[str] = mapped_column(String(100), primary_key=True)
+    display_name: Mapped[str] = mapped_column(String(200), default="")
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    allowed_zones: Mapped[list] = mapped_column(JSON, default=list)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+    embeddings: Mapped[list["FaceEmbeddingModel"]] = relationship(
+        back_populates="person",
+        cascade="all, delete-orphan",
+    )
+
+
+class FaceEmbeddingModel(Base):
+    __tablename__ = "face_embeddings"
+
+    embedding_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    person_id: Mapped[str] = mapped_column(ForeignKey("personnel.person_id"), index=True)
+    embedding: Mapped[list] = mapped_column(JSON)
+    model_name: Mapped[str] = mapped_column(String(100), default="buffalo_l")
+    model_version: Mapped[str] = mapped_column(String(100), default="unknown")
+    enrolled_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    person: Mapped[PersonnelModel] = relationship(back_populates="embeddings")
 
 
 class VehicleModel(Base):

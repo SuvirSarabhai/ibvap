@@ -19,39 +19,23 @@ from app.events.schema import Event
 from app.modules.anpr.ocr import read_plate
 from app.modules.anpr.plate_detector import PlateDetector
 from app.modules.anpr.voting import PlateVoter
+from app.modules.face_recognition import match_face
+from app.modules.loitering import process_loitering
 from app.modules.night_detection import process_night_check
+from app.modules.vehicle_behavior import VehicleBehaviorState, process_vehicle_behavior
 from app.modules.zone_intrusion import process_detection
+from app.core.track_history import TrackHistory
+from app.utils.demo_profiles import apply_demo_profile
+from app.utils.image_utils import save_evidence_snapshot
 from app.utils.logger import get_logger
+
+
+ANPR_REASON = "Restricted plate match"
+VEHICLE_DWELL_REASON = "Vehicle dwell in sensitive zone"
 from app.utils.paths import CONFIG_DIR, REPOSITORY_ROOT
 
 logger = get_logger(__name__)
 VEHICLE_CLASSES = {"car", "motorcycle", "bus", "truck"}
-
-EVIDENCE_DIR = REPOSITORY_ROOT / "evidence"
-EVIDENCE_DIR.mkdir(exist_ok=True)
-
-
-def _save_snapshot(frame, bbox: tuple, event_id: str) -> str | None:
-    """Crop + pad the bounding box and save as JPEG. Returns relative path or None."""
-    try:
-        x1, y1, x2, y2 = map(int, bbox)
-        h, w = frame.shape[:2]
-        pad = 20
-        x1c = max(0, x1 - pad)
-        y1c = max(0, y1 - pad)
-        x2c = min(w, x2 + pad)
-        y2c = min(h, y2 + pad)
-        crop = frame[y1c:y2c, x1c:x2c]
-        if crop.size == 0:
-            return None
-        filename = f"{event_id}.jpg"
-        path = EVIDENCE_DIR / filename
-        cv2.imwrite(str(path), crop, [cv2.IMWRITE_JPEG_QUALITY, 90])
-        return filename
-    except Exception:
-        logger.warning("Could not save evidence snapshot for %s", event_id)
-        return None
-
 
 
 class CameraWorker:
@@ -86,8 +70,10 @@ class CameraWorker:
         # Throttle base detection events: one per track_id per N seconds
         self._last_detection_time: dict[str, float] = {}
         self._detection_interval_s: float = 30.0
+        self.track_history = TrackHistory()
+        self.vehicle_behavior_state = VehicleBehaviorState()
         self.zones = self._load_zones()
-        self.thresholds = self._load_thresholds()
+        self.thresholds = apply_demo_profile(self._load_thresholds())
 
     def _load_zones(self) -> list[dict]:
         try:
@@ -114,6 +100,9 @@ class CameraWorker:
         night_seconds = float(self.thresholds.get("night_duration_seconds", 5))
         night_start = int(self.thresholds.get("night_start_hour", 20))
         night_end = int(self.thresholds.get("night_end_hour", 6))
+        loiter_seconds = float(self.thresholds.get("loiter_threshold_seconds", 15))
+        default_dwell_seconds = float(self.thresholds.get("dwell_threshold_seconds", 15))
+        default_speed = float(self.thresholds.get("moving_speed_threshold", 5))
 
         for detection in detections:
             class_name = detection.class_name.lower()
@@ -126,6 +115,7 @@ class CameraWorker:
                 continue
 
             # ── 1. Base detection event — throttled to once per track per 30 s ──
+            self._active_track_ids.add(detection.track_id)
             now = time.monotonic()
             last = self._last_detection_time.get(detection.track_id, 0.0)
             should_log = (now - last) >= self._detection_interval_s
@@ -134,8 +124,7 @@ class CameraWorker:
             if is_vehicle and detection.track_id not in self._snapped_tracks:
                 # Save one snapshot per track (first time we see this vehicle)
                 from uuid import uuid4
-                snap_id = str(uuid4())
-                snap_path = _save_snapshot(frame, detection.bbox, snap_id)
+                snap_path = save_evidence_snapshot(frame, detection.bbox, "detection", detection.track_id)
                 if snap_path:
                     self._snapped_tracks.add(detection.track_id)
 
@@ -157,42 +146,45 @@ class CameraWorker:
                     )
                 )
 
-            # ── 2. Zone check — persons only ──
-            if is_person:
-                event_description = f"Person in zone — {self.camera_id}"
-                for zone in camera_zones:
+            # ── 2. Border-zone analytics ──
+            for zone in camera_zones:
+                zone_id = str(zone["zone_id"])
+                if is_person:
+                    event_description = f"Person in zone — {self.camera_id}"
+                    matched = match_face(detection.track_id, frame, detection.bbox)
                     event, _ = process_detection(
-                        detection,
-                        self.camera_id,
-                        str(zone["zone_id"]),
-                        zone["polygon"],
-                        self.incident_tracker,
-                        frame_threshold,
-                        self.event_store,
-                        self.alert_manager,
-                        frame,
+                        detection, self.camera_id, zone_id, zone["polygon"],
+                        self.incident_tracker, frame_threshold, self.event_store,
+                        self.alert_manager, frame,
                         event_description=event_description,
-                        event_type_label="Zone Entry",
-                        entity_type=entity_type,
-                        confidence=detection.confidence,
-                        severity="high",
+                        event_type_label="Zone Entry", entity_type=entity_type,
+                        confidence=detection.confidence, severity="high",
+                        face_match_result=matched,
                     )
                     inside = bool(event.metadata.get("inside_zone"))
                     process_night_check(
-                        detection.track_id,
-                        self.camera_id,
-                        str(zone["zone_id"]),
-                        inside,
-                        self.incident_tracker,
-                        night_seconds,
-                        self.event_store,
-                        self.alert_manager,
-                        start_hour=night_start,
-                        end_hour=night_end,
+                        detection.track_id, self.camera_id, zone_id, inside,
+                        self.incident_tracker, night_seconds, self.event_store,
+                        self.alert_manager, start_hour=night_start, end_hour=night_end,
                         event_description=event_description,
-                        event_type_label="Night Movement",
-                        entity_type=entity_type,
-                        confidence=detection.confidence,
+                        event_type_label="Night Movement", entity_type=entity_type,
+                        confidence=detection.confidence, frame=frame,
+                        bbox=detection.bbox, face_match_result=matched,
+                    )
+                    process_loitering(
+                        detection, self.camera_id, zone_id, zone["polygon"],
+                        self.incident_tracker, float(zone.get("loiter_threshold_seconds", loiter_seconds)),
+                        self.event_store, self.alert_manager, frame,
+                        face_match_result=matched, confidence=detection.confidence,
+                    )
+                elif is_vehicle:
+                    process_vehicle_behavior(
+                        detection, self.camera_id, zone, self.track_history,
+                        self.incident_tracker, self.vehicle_behavior_state,
+                        self.event_store, self.alert_manager, frame,
+                        is_restricted=self.alert_manager.is_restricted,
+                        dwell_threshold_seconds=float(zone.get("dwell_threshold_seconds", default_dwell_seconds)),
+                        moving_speed_threshold=float(zone.get("moving_speed_threshold", default_speed)),
                     )
 
             # ── 3. ANPR — vehicles only ──
@@ -211,21 +203,30 @@ class CameraWorker:
                     continue
                 finalized.add(plate)
 
+                restricted = self.alert_manager.is_restricted(plate)
+                evidence_path = save_evidence_snapshot(
+                    frame, detection.bbox, "anpr", detection.track_id
+                )
                 event = self.event_store.save_event(
                     Event(
                         track_id=detection.track_id,
                         camera_id=self.camera_id,
                         event_type="vehicle_plate",
                         timestamp=datetime.now(timezone.utc),
-                        metadata={"plate": plate, "bbox": list(detection.bbox)},
-                        event_description=f"License plate detected — {plate}",
-                        event_type_label="ANPR",
+                        metadata={
+                            "plate": plate,
+                            "bbox": list(detection.bbox),
+                            "restricted": restricted,
+                        },
+                        evidence_path=evidence_path,
+                        event_description=ANPR_REASON if restricted else f"License plate detected — {plate}",
+                        event_type_label="Restricted Plate" if restricted else "ANPR",
                         entity_type="vehicle",
                         confidence=detection.confidence,
-                        severity="normal",
+                        severity="high" if restricted else "normal",
                     )
                 )
-                if self.alert_manager.is_restricted(plate):
+                if restricted:
                     self.alert_manager.create_alert_from_event(
                         event,
                         "restricted_vehicle",
@@ -236,13 +237,16 @@ class CameraWorker:
     def _clear_finished_tracks(self, detections: list[Detection]) -> None:
         """Drop plate state for tracks no longer present in the current frame."""
         active_tracks = {detection.track_id for detection in detections}
-        for track_id in list(self._finalized_plates):
-            if track_id not in active_tracks:
-                self._finalized_plates.pop(track_id, None)
-                self.plate_voter.clear(track_id)
-                self.incident_tracker.reset_track(track_id)
-        # Clean up snapped tracks that are no longer active
-        self._snapped_tracks -= (self._snapped_tracks - active_tracks)
+        known_tracks = set(self._active_track_ids)
+        for track_id in known_tracks - active_tracks:
+            self._finalized_plates.pop(track_id, None)
+            self.plate_voter.clear(track_id)
+            self.incident_tracker.reset_track(track_id)
+            self.track_history.clear(track_id)
+            self.vehicle_behavior_state.clear(track_id)
+            self._last_detection_time.pop(track_id, None)
+        self._active_track_ids = active_tracks
+        self._snapped_tracks.intersection_update(active_tracks)
 
     def run(self) -> None:
         reader = LatestFrameReader(self.source).start()
@@ -271,6 +275,9 @@ class CameraWorker:
                     self._snapped_tracks.clear()
                     self._last_detection_time.clear()
                     self._finalized_plates.clear()
+                    self._active_track_ids.clear()
+                    self.track_history.clear()
+                    self.vehicle_behavior_state.clear()
                     self.plate_voter._votes.clear() if hasattr(self.plate_voter, '_votes') else None
                     logger.info("Video looped (%d) — state reset for %s", current_loop, self.camera_id)
 
