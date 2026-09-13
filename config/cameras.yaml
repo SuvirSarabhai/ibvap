@@ -2,9 +2,66 @@
 # camera-1:   person detection against the restricted zone in zones.yaml
 cameras:
   - camera_id: camera-car
-    source: test_videos/car.mp4
+    source: test_videos/vehicle3.mp4
 
-  - camera_id: camera-1
-    source: test_videos/army.mp4
-    zones:
-      - border-zone-1
+  - camera_id: camera-vehicle
+    name: Vehicle Detection
+    source: test_videos/vehicle.mp4
+
+  - camera_id: camera-vehicle-copy
+    name: Vehicle Copy
+    source: test_videos/vehicle copy.mp4
+
+  - camera_id: camera-loitering
+    name: Loitering
+    source: test_videos/loitering.mp4
+
+  - camera_id: camera-loitering-army
+    name: Loitering Army
+    source: test_videos/Loitering-army.mp4
+
+  - camera_id: camera-night
+    name: Night Time
+    source: test_videos/night time.mp4
+
+  - camera_id: camera-zone-thief
+    name: Zone Intrusion Thief
+    source: test_videos/zone intrusion-thief.mp4
+
+  - camera_id: camera-zone-intrusion
+    name: Zone Intrusion
+    source: test_videos/zone intrusion.mp4
+
+ # - camera_id: camera-1
+ #   name: Restricted Zone · Loitering
+ #   source: test_videos/loitering.mp4
+ #   zones:
+ #     - border-zone-1
+
+  - camera_id: camera-loitering-copy
+    name: Loitering Copy
+    source: test_videos/loitering copy.mp4
+
+  #- camera_id: camera-loitering-army
+  #  name: Loitering Army
+  #  source: test_videos/Loitering-army.mp4
+
+  #- camera_id: camera-night
+  #  name: Night Time
+  #  source: test_videos/night time.mp4
+#
+  #- camera_id: camera-zone-thief
+  #  name: Zone Intrusion Thief
+  #  source: test_videos/zone intrusion-thief.mp4
+
+  #- camera_id: camera-vehicle-copy
+  #  name: Vehicle Copy
+  #  source: test_videos/vehicle copy.mp4
+
+  ##- camera_id: camera-zone-intrusion
+  ##  name: Zone Intrusion
+  ###  source: test_videos/zone intrusion.mp4
+
+  - camera_id: camera-zone-face
+    name: Zone Intrusion Face
+    source: test_videos/zone intrusion - face.mp4

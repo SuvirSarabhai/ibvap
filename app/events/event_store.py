@@ -76,7 +76,7 @@ class EventStore:
         from_time: datetime | None = None,
         to_time: datetime | None = None,
         page: int = 1,
-        page_size: int = 50,
+        page_size: int = 200,
         severity: str | None = None,
         status: str | None = None,
     ) -> list[Event]:
@@ -96,8 +96,20 @@ class EventStore:
             if status:
                 query = query.where(EventModel.status == status)
             size = min(max(1, page_size), 200)
-            query = query.offset((max(1, page) - 1) * size).limit(size)
-            return [self._to_schema(row) for row in session.scalars(query).all()]
+            offset = (max(1, page) - 1) * size
+            rows = session.scalars(query.offset(offset).limit(size)).all()
+
+            # The Activity Log is a unified stream.  Keep its bounded page for
+            # normal traffic, but include standalone face-match records even
+            # when a busy camera has pushed them beyond the first page.  This
+            # does not alter filtered/event-type pagination semantics.
+            if not event_type and not camera_id and not from_time and not to_time and not severity and not status and page == 1:
+                face_query = select(EventModel).where(EventModel.event_type == "face_match").order_by(EventModel.timestamp.desc())
+                face_rows = session.scalars(face_query.limit(size)).all()
+                seen = {row.event_id for row in rows}
+                rows.extend(row for row in face_rows if row.event_id not in seen)
+                rows.sort(key=lambda row: row.timestamp, reverse=True)
+            return [self._to_schema(row) for row in rows]
         finally:
             session.close()
 

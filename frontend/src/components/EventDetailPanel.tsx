@@ -8,6 +8,7 @@ import {
   Hash, ImageIcon, Tag, Cpu
 } from 'lucide-react'
 import SeverityBadge from './SeverityBadge'
+import { evidenceUrl } from '../api/client'
 
 const API_BASE = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000').replace(/\/$/, '')
 
@@ -67,7 +68,7 @@ export default function EventDetailPanel({ eventId, onClose }: Props) {
   const isVehicle = event?.entity_type === 'vehicle'
   const plate = event?.metadata?.plate as string | undefined
   const bbox = event?.metadata?.bbox as number[] | undefined
-  const evidenceUrl = event?.evidence_path ? `${API_BASE}/api/evidence/${event.evidence_path}` : null
+  const evidenceImageUrl = evidenceUrl(event?.evidence_path)
 
   const conf = event?.confidence != null
     ? Math.round(event.confidence <= 1 ? event.confidence * 100 : event.confidence)
@@ -150,7 +151,7 @@ export default function EventDetailPanel({ eventId, onClose }: Props) {
           {event && (
             <>
               {/* Evidence snapshot */}
-              {evidenceUrl && (
+              {evidenceImageUrl && (
                 <div>
                   <div className="text-xs font-semibold mb-2" style={{ color: '#64748B', letterSpacing: '0.06em' }}>
                     EVIDENCE SNAPSHOT
@@ -160,8 +161,11 @@ export default function EventDetailPanel({ eventId, onClose }: Props) {
                     style={{ border: '1px solid #E2E8F0', background: '#0f1923' }}
                   >
                     <img
-                      src={evidenceUrl}
-                      alt="Vehicle snapshot"
+                      src={evidenceImageUrl}
+                      alt="Event evidence snapshot"
+                      onError={(event) => {
+                        event.currentTarget.style.display = 'none'
+                      }}
                       style={{ width: '100%', maxHeight: 200, objectFit: 'contain' }}
                     />
                     <div

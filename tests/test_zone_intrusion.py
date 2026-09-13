@@ -3,10 +3,12 @@ from app.core.detector import Detection
 from app.modules.zone_intrusion import check_zone, process_detection
 
 
-def test_check_zone_uses_bbox_center():
+def test_check_zone_uses_bbox_bottom_center():
     polygon = [[0, 0], [10, 0], [10, 10], [0, 10]]
     assert check_zone("1", (2, 2, 4, 4), polygon)
     assert not check_zone("1", (20, 20, 30, 30), polygon)
+    # The box center is inside, but the feet are outside the zone.
+    assert not check_zone("1", (4, 0, 6, 12), polygon)
 
 
 def test_zone_promotion_happens_once_per_entry():

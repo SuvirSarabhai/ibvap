@@ -6,9 +6,11 @@ import SeverityBadge from '../components/SeverityBadge'
 import EventDetailPanel from '../components/EventDetailPanel'
 
 const EVENT_TYPES = [
-  'All', 'Detections', 'Zone Entry', 'Loitering', 'ANPR', 'Suspicious', 'Camera Events', 'Operator Actions',
+  'All', 'Detections', 'Face Match', 'Zone Entry', 'Loitering', 'ANPR', 'Suspicious', 'Camera Events', 'Operator Actions',
 ]
-const CAMERAS = ['All', 'CAM-01', 'CAM-02', 'CAM-04', 'CAM-05', 'CAM-07', 'CAM-08', 'CAM-09', 'CAM-11', 'CAM-14', 'CAM-17']
+// Keep the legacy camera choices, but add the standalone bridge camera so a
+// selected filter can never make a known face-match event unreachable.
+const CAMERAS = ['All', 'face-match-demo', 'CAM-01', 'CAM-02', 'CAM-04', 'CAM-05', 'CAM-07', 'CAM-08', 'CAM-09', 'CAM-11', 'CAM-14', 'CAM-17']
 const SEVERITIES = ['All', 'high', 'medium', 'normal']
 
 function Select({
@@ -67,7 +69,7 @@ export default function ActivityLog({ onSelectEntity }: Props) {
 
   useEffect(() => {
     let mounted = true
-    getEvents({ camera_id: camera, severity })
+    getEvents({ camera_id: camera, severity, page_size: 200 })
       .then((rows) => { if (mounted) setData(rows) })
       .catch((err) => { if (mounted) setError(err instanceof Error ? err.message : 'Unable to load events') })
       .finally(() => { if (mounted) setLoading(false) })
@@ -236,6 +238,11 @@ function ActivityRow({
           <span className="text-sm truncate" style={{ color: '#17212B' }}>
             {row.event}
           </span>
+          {row.entityType === 'vehicle' && row.plate && (
+            <span className="text-xs font-mono" style={{ color: '#2F6B4F' }}>
+              Plate: {row.plate}{row.plateConfidence != null ? ` · ${Math.round(row.plateConfidence * 100)}%` : ''}
+            </span>
+          )}
           {row.evidencePath && (
             <span className="flex items-center gap-1 text-xs" style={{ color: '#167D7F' }}>
               <ImageIcon size={10} />

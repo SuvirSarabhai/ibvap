@@ -4,7 +4,10 @@ from __future__ import annotations
 
 from datetime import timedelta
 
+import yaml
 from sqlalchemy import select
+
+from app.utils.paths import CONFIG_DIR
 
 from app.db.database import SessionLocal
 from app.db.models import AlertModel, EventModel, WatchlistModel
@@ -31,8 +34,9 @@ def _entity_id(event: Event) -> str | None:
 
 
 class AlertManager:
-    def __init__(self, session_factory=SessionLocal, broadcaster=None):
+    def __init__(self, session_factory=SessionLocal, broadcaster=None, cooldown_seconds: float | None = None):
         self.session_factory = session_factory
+        self.cooldown_seconds = self._load_cooldown() if cooldown_seconds is None else max(0.0, float(cooldown_seconds))
         if broadcaster is None:
             try:
                 from app.api.websocket import publish
@@ -42,15 +46,47 @@ class AlertManager:
                 broadcaster = None
         self.broadcaster = broadcaster
 
-    def create_alert_from_event(self, event: Event, alert_type: str, severity: str = "medium") -> Alert:
+    @staticmethod
+    def _load_cooldown() -> float:
+        try:
+            with (CONFIG_DIR / "thresholds.yaml").open(encoding="utf-8") as config_file:
+                values = yaml.safe_load(config_file) or {}
+            return max(0.0, float(values.get("alert_cooldown_seconds", 60)))
+        except (OSError, TypeError, ValueError, yaml.YAMLError):
+            return 60.0
+
+    def create_alert_from_event(self, event: Event, alert_type: str, severity: str = "medium") -> Alert | None:
         event.severity = severity
         session = self.session_factory()
         try:
-            cutoff = event.timestamp - timedelta(minutes=10)
+            cutoff = event.timestamp - timedelta(seconds=self.cooldown_seconds)
+            zone_filter = AlertModel.zone_id.is_(None) if event.zone_id is None else AlertModel.zone_id == event.zone_id
+            duplicate = session.scalar(
+                select(AlertModel)
+                .where(
+                    AlertModel.alert_type == alert_type,
+                    AlertModel.camera_id == event.camera_id,
+                    zone_filter,
+                    AlertModel.timestamp >= cutoff,
+                    AlertModel.timestamp <= event.timestamp,
+                )
+                .order_by(AlertModel.timestamp.desc())
+                .limit(1)
+            )
+            if duplicate is not None:
+                logger.info(
+                    "Suppressing alert %s for camera=%s zone=%s within %.1fs cooldown",
+                    alert_type,
+                    event.camera_id,
+                    event.zone_id,
+                    self.cooldown_seconds,
+                )
+                return None
+
             recent = session.scalars(
                 select(EventModel).where(
                     EventModel.track_id == event.track_id,
-                    EventModel.timestamp >= cutoff,
+                    EventModel.timestamp >= event.timestamp - timedelta(minutes=10),
                     EventModel.timestamp <= event.timestamp,
                     EventModel.zone_id.is_not(None),
                 )

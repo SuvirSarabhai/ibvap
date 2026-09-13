@@ -5,9 +5,13 @@ type Filters = Record<string, string | number | undefined>
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000').replace(/\/$/, '')
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
+  const headers = new Headers(options?.headers)
+  if (!(options?.body instanceof FormData) && !headers.has('Content-Type')) {
+    headers.set('Content-Type', 'application/json')
+  }
   const response = await fetch(`${API_BASE_URL}${path}`, {
-    headers: { 'Content-Type': 'application/json', ...(options?.headers || {}) },
     ...options,
+    headers,
   })
   if (!response.ok) {
     throw new Error((await response.text()) || `Request failed: ${response.status}`)
@@ -44,6 +48,15 @@ const label = (value: string | undefined) => value || 'Event'
 const displayTime = (value: string | undefined) => value ? new Date(value).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '--:--'
 const displayDate = (value: string | undefined) => value ? new Date(value).toLocaleDateString() : ''
 
+export function evidenceUrl(value: string | null | undefined): string | null {
+  if (!value) return null
+  // Stored paths are repository-relative, while older rows may contain
+  // Windows separators or an absolute repository path. The evidence API
+  // accepts only the basename, so normalize both forms here.
+  const filename = value.split(/[\\/]/).pop()
+  return filename ? `${API_BASE_URL}/api/evidence/${encodeURIComponent(filename)}` : null
+}
+
 export async function getEvents(filters: Filters = {}): Promise<ActivityRow[]> {
   const rows = await request<any[]>(`/api/events${query(filters)}`)
   return rows.map((row) => {
@@ -58,11 +71,13 @@ export async function getEvents(filters: Filters = {}): Promise<ActivityRow[]> {
       entityType: eType,
       camera: row.camera_id,
       zone: row.zone_id || 'Unassigned',
+      plate: row.metadata?.plate || null,
+      plateConfidence: row.metadata?.plate_confidence ?? null,
       confidence: Math.round((row.confidence ?? 0) <= 1 ? (row.confidence ?? 0) * 100 : row.confidence),
       threatScore: row.threat_score ?? 0,
       severity: severity(row.severity),
       status: row.status || 'open',
-      evidencePath: row.evidence_path ? `${API_BASE_URL}/api/evidence/${row.evidence_path}` : null,
+      evidencePath: evidenceUrl(row.evidence_path),
     }
   })
 }
@@ -128,5 +143,28 @@ export function createIncident(body: Record<string, unknown>) { return request('
 export function updateIncident(incidentId: string, body: Record<string, unknown>) { return request(`/api/incidents/${incidentId}`, { method: 'PATCH', body: JSON.stringify(body) }) }
 export function addIncidentNote(incidentId: string, body: Record<string, unknown>) { return request(`/api/incidents/${incidentId}/notes`, { method: 'POST', body: JSON.stringify(body) }) }
 export function getCameras() { return request<any[]>('/api/cameras') }
+
+export type PersonnelRecord = {
+  person_id: string
+  display_name: string
+  active: boolean
+  allowed_zones: string[]
+  active_embedding_count: number
+  active_embeddings: Array<{ embedding_id: string; enrolled_at?: string; model_name?: string }>
+}
+
+export function getPersonnel() { return request<PersonnelRecord[]>('/api/personnel') }
+export function createPersonnel(body: { display_name: string; allowed_zones: string[] }) {
+  return request<PersonnelRecord>('/api/personnel', { method: 'POST', body: JSON.stringify(body) })
+}
+export function enrollPersonnel(personId: string, file: File) {
+  const body = new FormData()
+  body.append('image', file)
+  return request(`/api/personnel/${personId}/enroll`, { method: 'POST', body })
+}
+export function deactivateEmbedding(personId: string, embeddingId: string) {
+  return request(`/api/personnel/${personId}/embeddings/${embeddingId}`, { method: 'DELETE' })
+}
+
 export function getSummary() { return request<{ cameras_total: number; cameras_online: number; cameras_offline: number; active_threats_high: number; active_threats_medium: number; incidents_today: number; incidents_confirmed: number; incidents_pending: number; system_health_pct: number }>('/api/summary') }
 export { API_BASE_URL }

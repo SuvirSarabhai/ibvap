@@ -15,11 +15,18 @@ _CYR_TO_LAT = str.maketrans("АВСЕЗКМНОРСТУХ", "AVCE3KMNORCTYX")
 
 
 def _normalise(text: str) -> str:
-    """Upper-case, strip spaces/dashes, map Cyrillic lookalikes to Latin."""
+    """Upper-case and remove OCR separators/noise from a plate candidate."""
     text = text.upper().translate(_CYR_TO_LAT)
-    # Keep only alphanumeric + hyphen
-    text = re.sub(r"[^A-Z0-9\-]", "", text)
-    return text.strip("-")
+    # Spaces, slashes, pipes, and dashes can separate stacked plate lines.
+    return re.sub(r"[^A-Z0-9]", "", text)
+
+
+def _is_fragment(normalised: str) -> bool:
+    """Return whether a short alpha/numeric OCR result may be assembled later."""
+    return bool(
+        re.fullmatch(r"[A-Z]{1,3}", normalised)
+        or re.fullmatch(r"[0-9]{3,8}", normalised)
+    )
 
 
 def preprocess_plate(crop):
@@ -30,9 +37,10 @@ def preprocess_plate(crop):
     return thresholded
 
 
-def read_plate(crop) -> list[str]:
+def read_plate(crop, *, camera_id: str | None = None, track_id: str | None = None) -> list[str]:
     global _reader
     if crop is None or crop.size == 0:
+        logger.info("ANPR OCR skipped camera=%s track=%s reason=empty_crop", camera_id, track_id)
         return []
     try:
         if _reader is None:
@@ -43,12 +51,41 @@ def read_plate(crop) -> list[str]:
         results = _reader.readtext(preprocess_plate(crop), detail=1)
         plates = []
         for (_, text, conf) in results:
+            logger.info(
+                "ANPR OCR raw read camera=%s track=%s text=%r confidence=%.3f",
+                camera_id,
+                track_id,
+                text,
+                conf,
+            )
             if conf < 0.3:
+                logger.info(
+                    "ANPR OCR read discarded camera=%s track=%s raw=%r reason=low_confidence",
+                    camera_id,
+                    track_id,
+                    text,
+                )
                 continue
             normalised = _normalise(text)
-            if len(normalised) >= 4:  # ignore very short noise reads
+            if len(normalised) >= 4 or _is_fragment(normalised):
                 plates.append(normalised)
+                if len(normalised) < 4:
+                    logger.info(
+                        "ANPR OCR fragment retained camera=%s track=%s raw=%r normalized=%r",
+                        camera_id,
+                        track_id,
+                        text,
+                        normalised,
+                    )
+            else:
+                logger.info(
+                    "ANPR OCR read discarded camera=%s track=%s raw=%r normalized=%r reason=too_short",
+                    camera_id,
+                    track_id,
+                    text,
+                    normalised,
+                )
         return plates
     except Exception:
-        logger.exception("License plate OCR failed")
+        logger.exception("License plate OCR failed camera=%s track=%s", camera_id, track_id)
         return []

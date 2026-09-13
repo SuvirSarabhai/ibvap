@@ -6,7 +6,8 @@ from pathlib import Path
 from uuid import uuid4
 
 import cv2
-from fastapi import APIRouter, HTTPException
+import numpy as np
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 
@@ -28,6 +29,7 @@ class EnrollmentRequest(BaseModel):
 
 
 def _person_payload(person: PersonnelModel, embedding_count: int | None = None) -> dict:
+    embeddings = [embedding for embedding in person.embeddings if embedding.active]
     return {
         "person_id": person.person_id,
         "display_name": person.display_name,
@@ -35,7 +37,17 @@ def _person_payload(person: PersonnelModel, embedding_count: int | None = None) 
         "allowed_zones": list(person.allowed_zones or []),
         "created_at": person.created_at,
         "updated_at": person.updated_at,
-        "active_embedding_count": embedding_count,
+        "active_embedding_count": len(embeddings) if embedding_count is None else embedding_count,
+        "active_embeddings": [
+            {
+                "embedding_id": embedding.embedding_id,
+                "model_name": embedding.model_name,
+                "model_version": embedding.model_version,
+                "enrolled_at": embedding.enrolled_at,
+                "active": embedding.active,
+            }
+            for embedding in embeddings
+        ],
     }
 
 
@@ -73,8 +85,22 @@ def list_personnel():
 
 
 @router.post("/{person_id}/enroll", status_code=201)
-def enroll_personnel(person_id: str, payload: EnrollmentRequest):
-    image = cv2.imread(str(Path(payload.image_path)))
+async def enroll_personnel(person_id: str, request: Request):
+    content_type = request.headers.get("content-type", "")
+    image = None
+    if content_type.startswith("multipart/form-data"):
+        form = await request.form()
+        upload = form.get("image")
+        if upload is not None and hasattr(upload, "read"):
+            contents = await upload.read()
+            image = cv2.imdecode(np.frombuffer(contents, dtype=np.uint8), cv2.IMREAD_COLOR)
+        else:
+            requested_path = form.get("image_path")
+            if requested_path:
+                image = cv2.imread(str(Path(str(requested_path))))
+    else:
+        payload = EnrollmentRequest.model_validate(await request.json())
+        image = cv2.imread(str(Path(payload.image_path)))
     if image is None:
         raise HTTPException(status_code=400, detail="Enrollment image could not be read")
     session = SessionLocal()

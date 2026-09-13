@@ -76,6 +76,7 @@ def get_camera_status() -> list[dict]:
         result.append(
             {
                 "camera_id": camera_id,
+                "name": camera.get("name") or camera_id.replace("-", " ").title(),
                 "source": camera.get("source"),
                 "zones": camera.get("zones", []),
                 "status": "online" if worker and worker.online else "offline",

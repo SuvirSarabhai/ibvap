@@ -20,6 +20,7 @@ interface CameraView {
 
 interface BackendCamera {
   camera_id: string
+  name?: string
   source?: string | null
   zones?: string[]
   status?: string
@@ -45,7 +46,7 @@ const streamUrl = (source: string | null | undefined) => {
 
 const toCameraView = (camera: BackendCamera): CameraView => ({
   id: camera.camera_id,
-  name: cameraName(camera.camera_id),
+  name: camera.name || cameraName(camera.camera_id),
   zone: camera.zones?.join(', ') || 'Unassigned',
   status: normalizeStatus(camera.status),
   uptimePct: 0,

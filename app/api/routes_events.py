@@ -19,7 +19,9 @@ def list_events(
     from_: datetime | None = Query(default=None, alias="from"),
     to: datetime | None = None,
     page: int = Query(default=1, ge=1),
-    page_size: int = Query(default=50, ge=1, le=200),
+    # Activity Log is a unified stream; include the full API page by default so
+    # ad-hoc/demo camera events are not hidden behind the recent-event cutoff.
+    page_size: int = Query(default=200, ge=1, le=200),
     severity: str | None = None,
     status: str | None = None,
 ):

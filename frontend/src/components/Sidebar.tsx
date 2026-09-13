@@ -7,6 +7,7 @@ import {
   Camera,
   Archive,
   Settings,
+  UsersRound,
   Shield,
 } from 'lucide-react'
 
@@ -20,6 +21,7 @@ const NAV = [
   { id: 'incidents', label: 'Confirmed Incidents', icon: FileCheck },
   { id: 'camera-health', label: 'Camera Health', icon: Camera },
   { id: 'evidence', label: 'Evidence', icon: Archive },
+  { id: 'personnel', label: 'Personnel', icon: UsersRound },
   { id: 'settings', label: 'Settings', icon: Settings },
 ]
 

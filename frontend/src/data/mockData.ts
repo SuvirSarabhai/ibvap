@@ -11,6 +11,8 @@ export interface ActivityRow {
   entityType: EntityType
   camera: string
   zone: string
+  plate?: string | null
+  plateConfidence?: number | null
   confidence: number
   threatScore: number
   severity: Severity

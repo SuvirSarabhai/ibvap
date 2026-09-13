@@ -61,7 +61,11 @@ class CameraWorker:
         self.event_store = event_store or EventStore()
         self.alert_manager = alert_manager or AlertManager()
         self.plate_detector = PlateDetector()
-        self.plate_voter = PlateVoter()
+        self.thresholds = apply_demo_profile(self._load_thresholds())
+        self.plate_voter = PlateVoter(
+            plate_format=self.thresholds.get("plate_format", "generic"),
+            fragment_window_seconds=self.thresholds.get("plate_fragment_window_seconds", 2.0),
+        )
         # A voter returns the finalized mode on every later valid read. A latch
         # makes one finalized plate produce one event/alert per track incident.
         self._finalized_plates: dict[str, set[str]] = {}
@@ -73,7 +77,6 @@ class CameraWorker:
         self.track_history = TrackHistory()
         self.vehicle_behavior_state = VehicleBehaviorState()
         self.zones = self._load_zones()
-        self.thresholds = apply_demo_profile(self._load_thresholds())
 
     def _load_zones(self) -> list[dict]:
         try:
@@ -192,7 +195,7 @@ class CameraWorker:
                 continue
 
             crop = self.plate_detector.detect(frame, detection.bbox)
-            reads = read_plate(crop)
+            reads = read_plate(crop, camera_id=self.camera_id, track_id=detection.track_id)
             for read in reads:
                 plate = self.plate_voter.add_read(detection.track_id, read)
                 if not plate:
@@ -278,7 +281,7 @@ class CameraWorker:
                     self._active_track_ids.clear()
                     self.track_history.clear()
                     self.vehicle_behavior_state.clear()
-                    self.plate_voter._votes.clear() if hasattr(self.plate_voter, '_votes') else None
+                    self.plate_voter.clear_all()
                     logger.info("Video looped (%d) — state reset for %s", current_loop, self.camera_id)
 
                 last_sequence = sequence

@@ -55,7 +55,48 @@ def test_loitering_authorized_has_no_alert():
             authorization_checker=lambda *_: {"outcome": "authorized", "person_id": "p1"},
         )
     assert len(store.events) == 1
+    assert store.events[0].event_description == "Loitering threshold exceeded"
+    assert store.events[0].metadata["authorization_outcome"] == "authorized"
+    assert store.events[0].metadata["person_id"] == "p1"
     assert alerts.calls == []
+
+
+def test_loitering_unauthorized_preserves_outcome_and_alert_reason():
+    tracker = IncidentTracker()
+    store = Store()
+    alerts = Alerts()
+    detection = Detection("p", "person", (2, 2, 4, 4), 0.9)
+    for _ in range(2):
+        process_loitering(
+            detection, "cam", "zone", [[0, 0], [10, 0], [10, 10], [0, 10]],
+            tracker, 0, store, alerts, np.zeros((20, 20, 3), dtype=np.uint8),
+            authorization_checker=lambda *_: {"outcome": "unauthorized", "person_id": None},
+        )
+    assert len(store.events) == 1
+    assert store.events[0].event_description == "Loitering threshold exceeded"
+    assert store.events[0].metadata["authorization_outcome"] == "unauthorized"
+    assert store.events[0].metadata["person_id"] is None
+    assert len(alerts.calls) == 1
+    assert alerts.calls[0][0].event_description == "Loitering threshold exceeded"
+
+
+def test_loitering_unresolved_preserves_outcome_and_alert_reason():
+    tracker = IncidentTracker()
+    store = Store()
+    alerts = Alerts()
+    detection = Detection("p", "person", (2, 2, 4, 4), 0.9)
+    for _ in range(2):
+        process_loitering(
+            detection, "cam", "zone", [[0, 0], [10, 0], [10, 10], [0, 10]],
+            tracker, 0, store, alerts, np.zeros((20, 20, 3), dtype=np.uint8),
+            authorization_checker=lambda *_: {"outcome": "unresolved", "person_id": None},
+        )
+    assert len(store.events) == 1
+    assert store.events[0].event_description == "Loitering threshold exceeded"
+    assert store.events[0].metadata["authorization_outcome"] == "unresolved"
+    assert store.events[0].metadata["person_id"] is None
+    assert len(alerts.calls) == 1
+    assert alerts.calls[0][0].event_description == "Loitering threshold exceeded"
 
 
 def test_vehicle_dwell_does_not_require_plate():

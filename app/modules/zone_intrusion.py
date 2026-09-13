@@ -16,12 +16,17 @@ from app.utils.image_utils import save_evidence_snapshot
 
 
 def check_zone(track_id: str, bbox: Iterable[float], zone_polygon: list[list[float]]) -> bool:
-    """Check the center of a tracked bbox against a configured polygon."""
+    """Check a track's ground-contact point against a configured polygon.
+
+    The bottom-center of a person/vehicle box is the point where the entity
+    meets the ground. Using the bbox center can classify a tall person as
+    inside while their feet are still outside a restricted area.
+    """
     del track_id
     x1, y1, x2, y2 = bbox
-    center = ((float(x1) + float(x2)) / 2, (float(y1) + float(y2)) / 2)
+    ground_point = ((float(x1) + float(x2)) / 2, float(y2))
     polygon = np.asarray(zone_polygon, dtype=np.float32).reshape((-1, 1, 2))
-    return cv2.pointPolygonTest(polygon, center, False) >= 0
+    return cv2.pointPolygonTest(polygon, ground_point, False) >= 0
 
 
 def process_detection(

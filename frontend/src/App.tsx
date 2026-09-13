@@ -9,8 +9,9 @@ import Incidents from './pages/Incidents'
 import CameraHealth from './pages/CameraHealth'
 import EvidenceLibrary from './pages/EvidenceLibrary'
 import Settings from './pages/Settings'
+import Personnel from './pages/Personnel'
 
-type Page = 'dashboard' | 'live' | 'activity' | 'threats' | 'incidents' | 'camera-health' | 'evidence' | 'settings'
+type Page = 'dashboard' | 'live' | 'activity' | 'threats' | 'incidents' | 'camera-health' | 'evidence' | 'personnel' | 'settings'
 
 export default function App() {
   const [page, setPage] = useState<Page>('dashboard')
@@ -37,6 +38,7 @@ export default function App() {
       case 'incidents': return <Incidents />
       case 'camera-health': return <CameraHealth />
       case 'evidence': return <EvidenceLibrary />
+      case 'personnel': return <Personnel />
       case 'settings': return <Settings />
       default: return <Dashboard onNavigate={navigate} />
     }

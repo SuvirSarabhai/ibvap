@@ -7,7 +7,23 @@ zones:
       - [760, 429]   # bottom-right
       - [531, 428]     # top-right
     sensitivity: medium
-    sensitive: true
-    loiter_threshold_seconds: 15
-    moving_speed_threshold: 5
-    dwell_threshold_seconds: 15
+
+  - zone_id: border-zone-2
+    camera_id: camera-zone-face
+    polygon:
+      - [64, 2]     # top-left
+      - [764, 1]   # bottom-left
+      - [765, 427]   # bottom-right
+      - [73, 429]     # top-right
+    sensitivity: medium
+
+
+  - zone_id: border-zone-3
+    camera_id: camera-loitering-copy
+    polygon:
+      - [2, 3]
+      - [764, 3]
+      - [765, 429]
+      - [3, 429]
+    sensitivity: medium
+

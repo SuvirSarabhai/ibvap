@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from typing import Any, Callable
 
 from app.events.schema import Event
-from app.modules.authorization import authorization_reason, check_authorization
+from app.modules.authorization import check_authorization
 from app.modules.zone_intrusion import check_zone
 from app.utils.image_utils import save_evidence_snapshot
 
@@ -43,7 +43,6 @@ def process_loitering(
         matched = face_matcher(detection.track_id, frame, detection.bbox)
     authorization = authorization_checker(detection.track_id, zone_id, matched)
     evidence = save_evidence_snapshot(frame, detection.bbox, "loitering", detection.track_id)
-    reason = authorization_reason(authorization["outcome"])
     event = Event(
         track_id=detection.track_id,
         camera_id=camera_id,
@@ -57,7 +56,7 @@ def process_loitering(
             "person_id": authorization["person_id"],
         },
         evidence_path=evidence,
-        event_description=reason or event_description or f"Person loitering in {zone_id}",
+        event_description="Loitering threshold exceeded",
         event_type_label=event_type_label,
         entity_type="person",
         confidence=confidence,
