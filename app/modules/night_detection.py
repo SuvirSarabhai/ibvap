@@ -70,7 +70,7 @@ def process_night_check(
         entity_type=entity_type,
         confidence=confidence,
         severity=severity,
-        evidence_path=save_evidence_snapshot(frame, bbox, "night-movement", track_id) if bbox is not None else None,
+        evidence_path=save_evidence_snapshot(frame, bbox, "night-movement", track_id),
     )
     promoted = check_night_movement(
         inside_zone, tracker, track_id, current_time=current_time,

@@ -117,6 +117,10 @@ export function updateAlert(alertId: string, body: Record<string, unknown>) {
   return request(`/api/alerts/${alertId}`, { method: 'PATCH', body: JSON.stringify(payload) })
 }
 
+export function escalateAlert(alertId: string) {
+  return request(`/api/alerts/${alertId}/escalate`, { method: 'POST' })
+}
+
 export function incidentToEntry(row: any): IncidentEntry {
   return {
     id: row.incident_id,

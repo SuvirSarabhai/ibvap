@@ -27,3 +27,22 @@ zones:
       - [3, 429]
     sensitivity: medium
 
+  - zone_id: border-zone-4
+    camera_id: camera-zone-intrusion
+    polygon:
+      - [64, 2]
+      - [764, 1]
+      - [765, 427]
+      - [73, 429]
+    sensitivity: medium
+
+  - zone_id: border-zone-face2
+    camera_id: camera-loitering-face
+    polygon:
+      - [0, 0]
+      - [767, 0]
+      - [767, 431]
+      - [0, 431]
+    sensitivity: medium
+
+   

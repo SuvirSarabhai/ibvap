@@ -75,6 +75,7 @@ class Incident(BaseModel):
     assigned_to: str | None = None
     status: Literal["open", "reviewing", "escalated", "closed"] = "open"
     evidence_count: int = 0
+    evidence_path: str | None = None
     notes: list[IncidentNote] = Field(default_factory=list)
 
 

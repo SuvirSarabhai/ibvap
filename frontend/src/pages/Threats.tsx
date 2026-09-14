@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { AlertTriangle, User, Car, ChevronDown, Shield, Check, ArrowUpRight, Clock } from 'lucide-react'
 import type { ThreatEntry, ThreatStatus } from '../data/mockData'
-import { alertToThreat, getAlerts, updateAlert } from '../api/client'
+import { alertToThreat, escalateAlert, getAlerts, updateAlert } from '../api/client'
 import useAlertSocket from '../hooks/useAlertSocket'
 import SeverityBadge from '../components/SeverityBadge'
 
@@ -47,9 +47,16 @@ export default function Threats() {
 
   const updateStatus = async (id: string, status: ThreatStatus) => {
     try {
-      const alert = await updateAlert(id, { status, assigned_to: status === 'acknowledged' ? 'J. Ramirez' : undefined })
-      const next = alertToThreat(alert)
-      setData((previous) => previous.map((item) => item.id === id ? next : item))
+      const alert = status === 'escalated'
+        ? await escalateAlert(id)
+        : await updateAlert(id, { status, assigned_to: status === 'acknowledged' ? 'J. Ramirez' : undefined })
+      if (status === 'escalated') {
+        const refreshed = await getAlerts()
+        setData(refreshed)
+      } else {
+        const next = alertToThreat(alert)
+        setData((previous) => previous.map((item) => item.id === id ? next : item))
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unable to update alert')
     }

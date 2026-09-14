@@ -14,28 +14,29 @@ logger = get_logger(__name__)
 
 def save_evidence_snapshot(
     frame,
-    bbox,
+    bbox=None,
     prefix: str = "snapshot",
     track_id: str | None = None,
 ) -> str | None:
-    """Save a padded JPEG crop and return its repository-relative path."""
+    """Save the full frame with an optional entity bounding-box overlay."""
     if frame is None:
         return None
     try:
         height, width = frame.shape[:2]
-        x1, y1, x2, y2 = (int(value) for value in bbox)
-        box_width = max(1, x2 - x1)
-        box_height = max(1, y2 - y1)
-        pad_x = int(round(box_width * 0.12))
-        pad_y = int(round(box_height * 0.12))
-        x1, x2 = max(0, min(x1 - pad_x, width)), max(0, min(x2 + pad_x, width))
-        y1, y2 = max(0, min(y1 - pad_y, height)), max(0, min(y2 + pad_y, height))
-        if x2 <= x1 or y2 <= y1:
-            return None
+        evidence = frame.copy()
+        if bbox is not None:
+            x1, y1, x2, y2 = (int(value) for value in bbox)
+            x1 = max(0, min(x1, width - 1))
+            y1 = max(0, min(y1, height - 1))
+            x2 = max(0, min(x2, width - 1))
+            y2 = max(0, min(y2, height - 1))
+            if x2 <= x1 or y2 <= y1:
+                return None
+            cv2.rectangle(evidence, (x1, y1), (x2, y2), (0, 0, 255), 3)
         EVIDENCE_DIR.mkdir(parents=True, exist_ok=True)
         identity = f"_{track_id}" if track_id else ""
         path = EVIDENCE_DIR / f"{prefix}{identity}_{uuid4().hex}.jpg"
-        if not cv2.imwrite(str(path), frame[y1:y2, x1:x2], [cv2.IMWRITE_JPEG_QUALITY, 90]):
+        if not cv2.imwrite(str(path), evidence, [cv2.IMWRITE_JPEG_QUALITY, 90]):
             return None
         return str(path.relative_to(REPOSITORY_ROOT)).replace("\\", "/")
     except Exception:

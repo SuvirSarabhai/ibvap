@@ -32,36 +32,17 @@ cameras:
     name: Zone Intrusion
     source: test_videos/zone intrusion.mp4
 
- # - camera_id: camera-1
- #   name: Restricted Zone · Loitering
- #   source: test_videos/loitering.mp4
- #   zones:
- #     - border-zone-1
+
 
   - camera_id: camera-loitering-copy
     name: Loitering Copy
     source: test_videos/loitering copy.mp4
 
-  #- camera_id: camera-loitering-army
-  #  name: Loitering Army
-  #  source: test_videos/Loitering-army.mp4
-
-  #- camera_id: camera-night
-  #  name: Night Time
-  #  source: test_videos/night time.mp4
-#
-  #- camera_id: camera-zone-thief
-  #  name: Zone Intrusion Thief
-  #  source: test_videos/zone intrusion-thief.mp4
-
-  #- camera_id: camera-vehicle-copy
-  #  name: Vehicle Copy
-  #  source: test_videos/vehicle copy.mp4
-
-  ##- camera_id: camera-zone-intrusion
-  ##  name: Zone Intrusion
-  ###  source: test_videos/zone intrusion.mp4
 
   - camera_id: camera-zone-face
     name: Zone Intrusion Face
     source: test_videos/zone intrusion - face.mp4
+
+  - camera_id: camera-loitering-face
+    name: Authorized Face Loitering
+    source: test_videos/loitering-face.mp4

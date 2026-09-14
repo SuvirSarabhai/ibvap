@@ -8,7 +8,8 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 from app.events.alert_manager import AlertManager
-from app.events.schema import Alert
+from app.events.incident_store import IncidentStore
+from app.events.schema import Alert, Incident
 
 router = APIRouter(prefix="/api/alerts", tags=["alerts"])
 
@@ -34,9 +35,17 @@ def list_alerts(
     entity_type: str | None = None,
     threat_score_min: int | None = Query(default=None, ge=0, le=100),
     page: int = Query(default=1, ge=1),
-    page_size: int = Query(default=50, ge=1, le=200),
+    page_size: int = Query(default=200, ge=1, le=200),
 ):
     return AlertManager().get_alerts(status, severity, entity_type, threat_score_min, page, page_size)
+
+
+@router.post("/{alert_id}/escalate", response_model=Incident)
+def escalate_alert(alert_id: str):
+    incident = IncidentStore().create_from_alert(alert_id)
+    if incident is None:
+        raise HTTPException(status_code=404, detail="Alert not found")
+    return incident
 
 
 @router.patch("/{alert_id}", response_model=Alert)

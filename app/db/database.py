@@ -66,6 +66,9 @@ def init_db() -> None:
             "zone_id": "VARCHAR(100)",
             "assigned_to": "VARCHAR(100)",
         },
+        "incidents": {
+            "evidence_path": "TEXT",
+        },
         "personnel": {
             "display_name": "VARCHAR(200) DEFAULT ''",
             "active": "BOOLEAN DEFAULT TRUE",

@@ -152,7 +152,15 @@ class AlertManager:
         finally:
             session.close()
 
-    def get_alerts(self, status=None, severity=None, entity_type=None, threat_score_min=None, page=1, page_size=50) -> list[Alert]:
+    def get_alert(self, alert_id: str) -> Alert | None:
+        session = self.session_factory()
+        try:
+            row = session.get(AlertModel, alert_id)
+            return _alert_from_row(row) if row is not None else None
+        finally:
+            session.close()
+
+    def get_alerts(self, status=None, severity=None, entity_type=None, threat_score_min=None, page=1, page_size=200) -> list[Alert]:
         session = self.session_factory()
         try:
             query = select(AlertModel).order_by(AlertModel.timestamp.desc())

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import threading
 from pathlib import Path
 from typing import Any
@@ -112,7 +113,7 @@ def extract_embedding(image, *, settings: dict[str, Any] | None = None) -> tuple
     return "ok", vector / norm
 
 
-def _active_gallery(session):
+def _active_gallery(session, camera_id: str | None = None):
     rows = session.query(FaceEmbeddingModel, PersonnelModel).join(
         PersonnelModel, FaceEmbeddingModel.person_id == PersonnelModel.person_id
     ).filter(FaceEmbeddingModel.active.is_(True), PersonnelModel.active.is_(True)).all()
@@ -125,10 +126,35 @@ def _active_gallery(session):
                 gallery.append((person, vector / norm))
         except (TypeError, ValueError):
             continue
+
+    # Optional demo bridge: add a supplied embedding to the normal gallery for
+    # one configured camera. Face detection and similarity matching still run;
+    # authorization remains backed by the PersonnelModel row.
+    override_path = os.environ.get("IBVAP_FACE_OVERRIDE_EMBEDDING")
+    override_person_id = os.environ.get("IBVAP_FACE_OVERRIDE_PERSON_ID")
+    override_cameras = {
+        value.strip() for value in os.environ.get("IBVAP_FACE_OVERRIDE_CAMERAS", "").split(",") if value.strip()
+    }
+    if override_path and override_person_id and (not override_cameras or camera_id in override_cameras):
+        try:
+            vector = np.asarray(np.load(override_path, allow_pickle=True), dtype=np.float32).reshape(-1)
+            norm = float(np.linalg.norm(vector))
+            if vector.size and norm and np.isfinite(vector).all():
+                person = type(
+                    "OverridePerson",
+                    (),
+                    {
+                        "person_id": override_person_id,
+                        "display_name": os.environ.get("IBVAP_FACE_OVERRIDE_NAME", override_person_id),
+                    },
+                )()
+                gallery.append((person, vector / norm))
+        except (OSError, TypeError, ValueError):
+            pass
     return gallery
 
 
-def match_face(track_id: str, frame, bbox) -> dict[str, str | float | None]:
+def match_face(track_id: str, frame, bbox, camera_id: str | None = None) -> dict[str, str | float | None]:
     """Detect, quality-gate, and match a face against active enrolled embeddings."""
     del track_id
     settings = _settings()
@@ -144,7 +170,7 @@ def match_face(track_id: str, frame, bbox) -> dict[str, str | float | None]:
     try:
         best_person = None
         best_similarity = 0.0
-        for person, enrolled in _active_gallery(session):
+        for person, enrolled in _active_gallery(session, camera_id):
             if enrolled.shape != live_embedding.shape:
                 continue
             similarity = float(np.dot(live_embedding, enrolled))

@@ -5,7 +5,7 @@ from __future__ import annotations
 from sqlalchemy import select
 
 from app.db.database import SessionLocal
-from app.db.models import IncidentModel
+from app.db.models import AlertModel, IncidentModel
 from app.events.schema import Incident, IncidentNote
 from app.utils.logger import get_logger
 
@@ -33,8 +33,66 @@ class IncidentStore:
             assigned_to=row.assigned_to,
             status=row.status,
             evidence_count=row.evidence_count or 0,
+            evidence_path=row.evidence_path,
             notes=notes,
         )
+
+    def create_from_alert(self, alert_id: str) -> Incident | None:
+        session = self.session_factory()
+        try:
+            alert = session.get(AlertModel, alert_id)
+            if alert is None:
+                return None
+            existing = session.scalar(
+                select(IncidentModel).where(IncidentModel.alert_id == alert_id).limit(1)
+            )
+            if existing is not None:
+                if alert.status != "escalated":
+                    alert.status = "escalated"
+                    session.commit()
+                return self._to_schema(existing)
+
+            incident = Incident(
+                alert_id=alert.alert_id,
+                event_id=alert.event_id,
+                incident_type=alert.alert_type,
+                entity_id=alert.entity_id,
+                entity_type=alert.entity_type,
+                severity=alert.severity,
+                camera_id=alert.camera_id,
+                zone_id=alert.zone_id,
+                opened_at=alert.timestamp,
+                assigned_to=alert.assigned_to or alert.operator_id,
+                evidence_count=1 if alert.evidence_path else 0,
+            )
+            row = IncidentModel(
+                incident_id=incident.incident_id,
+                alert_id=incident.alert_id,
+                event_id=incident.event_id,
+                incident_type=incident.incident_type,
+                entity_id=incident.entity_id,
+                entity_type=incident.entity_type,
+                severity=incident.severity,
+                camera_id=incident.camera_id,
+                zone_id=incident.zone_id,
+                opened_at=incident.opened_at,
+                assigned_to=incident.assigned_to,
+                status=incident.status,
+                evidence_count=incident.evidence_count,
+                evidence_path=alert.evidence_path,
+                notes=[],
+            )
+            session.add(row)
+            alert.status = "escalated"
+            session.commit()
+            session.refresh(row)
+            return self._to_schema(row)
+        except Exception:
+            session.rollback()
+            logger.exception("Could not escalate alert %s", alert_id)
+            raise
+        finally:
+            session.close()
 
     def create_incident(self, incident: Incident) -> Incident:
         session = self.session_factory()
@@ -53,6 +111,7 @@ class IncidentStore:
                 assigned_to=incident.assigned_to,
                 status=incident.status,
                 evidence_count=incident.evidence_count,
+                evidence_path=incident.evidence_path,
                 notes=[note.model_dump(mode="json") for note in incident.notes],
             )
             session.add(row)

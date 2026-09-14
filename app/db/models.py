@@ -77,6 +77,7 @@ class IncidentModel(Base):
     assigned_to: Mapped[str | None] = mapped_column(String(100), nullable=True)
     status: Mapped[str] = mapped_column(String(30), default="open", index=True)
     evidence_count: Mapped[int] = mapped_column(Integer, default=0)
+    evidence_path: Mapped[str | None] = mapped_column(Text, nullable=True)
     notes: Mapped[list] = mapped_column(JSON, default=list)
 
 

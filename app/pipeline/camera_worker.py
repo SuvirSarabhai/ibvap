@@ -70,7 +70,8 @@ class CameraWorker:
         # makes one finalized plate produce one event/alert per track incident.
         self._finalized_plates: dict[str, set[str]] = {}
         self._active_track_ids: set[str] = set()
-        self._snapped_tracks: set[str] = set()  # track_ids we've already snapped
+        self._face_matches: dict[str, dict] = {}
+        self._snapped_tracks: set[str] = set()  # retained for compatibility with worker state resets
         # Throttle base detection events: one per track_id per N seconds
         self._last_detection_time: dict[str, float] = {}
         self._detection_interval_s: float = 30.0
@@ -123,13 +124,19 @@ class CameraWorker:
             last = self._last_detection_time.get(detection.track_id, 0.0)
             should_log = (now - last) >= self._detection_interval_s
 
-            snap_path = None
-            if is_vehicle and detection.track_id not in self._snapped_tracks:
-                # Save one snapshot per track (first time we see this vehicle)
-                from uuid import uuid4
-                snap_path = save_evidence_snapshot(frame, detection.bbox, "detection", detection.track_id)
-                if snap_path:
-                    self._snapped_tracks.add(detection.track_id)
+            snap_path = (
+                save_evidence_snapshot(frame, detection.bbox, "detection", detection.track_id)
+                if should_log
+                else None
+            )
+
+            if is_person:
+                matched = self._face_matches.get(detection.track_id)
+                if matched is None or matched.get("status") != "matched":
+                    matched = match_face(detection.track_id, frame, detection.bbox, self.camera_id)
+                    self._face_matches[detection.track_id] = matched
+            else:
+                matched = None
 
             if should_log:
                 self._last_detection_time[detection.track_id] = now
@@ -154,7 +161,6 @@ class CameraWorker:
                 zone_id = str(zone["zone_id"])
                 if is_person:
                     event_description = f"Person in zone — {self.camera_id}"
-                    matched = match_face(detection.track_id, frame, detection.bbox)
                     event, _ = process_detection(
                         detection, self.camera_id, zone_id, zone["polygon"],
                         self.incident_tracker, frame_threshold, self.event_store,
@@ -243,6 +249,7 @@ class CameraWorker:
         known_tracks = set(self._active_track_ids)
         for track_id in known_tracks - active_tracks:
             self._finalized_plates.pop(track_id, None)
+            self._face_matches.pop(track_id, None)
             self.plate_voter.clear(track_id)
             self.incident_tracker.reset_track(track_id)
             self.track_history.clear(track_id)
@@ -279,6 +286,7 @@ class CameraWorker:
                     self._last_detection_time.clear()
                     self._finalized_plates.clear()
                     self._active_track_ids.clear()
+                    self._face_matches.clear()
                     self.track_history.clear()
                     self.vehicle_behavior_state.clear()
                     self.plate_voter.clear_all()
